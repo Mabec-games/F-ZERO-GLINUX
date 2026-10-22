@@ -28,11 +28,11 @@ apt-get install -y software-properties-common curl git
 add-apt-repository -y ppa:ubuntu-toolchain-r/test
 apt-get update
 apt-get install -y \
-    gcc-13 g++-13 ninja-build cmake \
+    gcc-13 g++-13 ninja-build cmake pkg-config \
     libgl1-mesa-dev libvulkan-dev libasound2-dev libpulse-dev libudev-dev \
     libx11-dev libxext-dev libxrandr-dev libxi-dev libwayland-dev wayland-protocols \
     libcurl4-openssl-dev libbluetooth-dev libenet-dev libhidapi-dev \
-    liblz4-dev libzstd-dev zlib1g-dev libspng-dev libfmt-dev libxxhash-dev \
+    liblz4-dev libzstd-dev zlib1g-dev libfmt-dev libxxhash-dev \
     libbz2-dev libusb-1.0-0-dev libpugixml-dev fonts-noto-core libfuse2 file
 
 export CC=gcc-13
