@@ -30,7 +30,7 @@ python3 "$root/scripts/collect-appimage-licenses.py" "$root" "$appdir"
 python3 "$root/scripts/audit-appdir.py" "$appdir"
 minimum="$(cat "$appdir/usr/share/fzero-glinux/minimum-glibc")"
 version="${GLINUX_VERSION:-preview-$(date +%Y%m%d)}"
-export LDAI_OUTPUT="$root/dist/F-ZERO-GLINUX-$version-glibc$minimum-x86_64.AppImage"
+export LDAI_OUTPUT="${GLINUX_APPIMAGE_OUTPUT:-$root/dist/F-ZERO-GLINUX-$version-glibc$minimum-x86_64.AppImage}"
 export LINUXDEPLOY_OUTPUT_VERSION="$version"
 # Reuse the installed linuxdeploy AppImage runtime for offline packaging.
 # A release builder may supply a separately pinned runtime instead.

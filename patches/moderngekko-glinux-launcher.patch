@@ -33,7 +33,7 @@ index 0adc855..49327ac 100644
    std::filesystem::path user_directory;
    ModuleSource module;
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..5cb2de7 100644
+index f9b5405..7513a16 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -13,6 +13,7 @@
@@ -52,7 +52,7 @@ index f9b5405..5cb2de7 100644
  bool s_external_ui_common = false;
  std::unique_ptr<BootSessionData> s_boot_session_data;
  u64 s_previous_net_wait_ns = 0;
-@@ -113,7 +115,7 @@ PowerPC::CPUCore SelectCPUCore() {
+@@ -113,10 +115,12 @@ PowerPC::CPUCore SelectCPUCore() {
  std::vector<std::string> Host_GetPreferredLocales() { return {}; }
  void Host_PPCSymbolsChanged() {}
  void Host_PPCBreakpointsChanged() {}
@@ -61,7 +61,12 @@ index f9b5405..5cb2de7 100644
  void Host_Message(HostMessageID id) {
    if (id == HostMessageID::WMUserStop && s_platform)
      s_platform->Stop();
-@@ -514,6 +516,7 @@ struct Runtime::Impl {
++  else if (id == HostMessageID::WMUserConfirmExit && s_platform)
++    s_platform->ConfirmExit();
+ }
+ void Host_UpdateTitle(const std::string &) {
+   if (!s_platform)
+@@ -514,6 +518,7 @@ struct Runtime::Impl {
    RuntimeAutomationState automation_state;
    Common::EventHook present_hook;
    bool automation_registered = false;
@@ -69,7 +74,7 @@ index f9b5405..5cb2de7 100644
    std::jthread automation_thread;
  };
  
-@@ -569,7 +572,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -569,7 +574,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    else if (config.module.kind == ModuleSource::Kind::AttachedDescriptor)
      module_result =
          validation_library.Attach(config.module.descriptor, requirements);
@@ -78,7 +83,7 @@ index f9b5405..5cb2de7 100644
      return {
          {},
          RuntimeError{
-@@ -613,6 +616,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -613,6 +618,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
      impl->ui_initialized = true;
    }
    Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
@@ -90,7 +95,7 @@ index f9b5405..5cb2de7 100644
  
    if (impl->config.headless)
      impl->platform = Platform::CreateHeadlessPlatform();
-@@ -639,6 +647,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -639,6 +649,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
                           "the requested Dolphin host platform is unavailable"}};
    }
  
@@ -111,7 +116,7 @@ index f9b5405..5cb2de7 100644
    const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
    UICommon::InitControllers(wsi);
    impl->controllers_initialized = true;
-@@ -665,6 +687,22 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -665,6 +689,22 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    if (impl->config.graphics.internal_resolution_scale)
      Config::SetBase(Config::GFX_EFB_SCALE,
                      *impl->config.graphics.internal_resolution_scale);
@@ -134,7 +139,7 @@ index f9b5405..5cb2de7 100644
    Config::SetBase(Config::GFX_SHADER_CACHE, true);
    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                    ShaderCompilationMode::AsynchronousUberShaders);
-@@ -792,6 +830,12 @@ RuntimeRunResult Runtime::Run() {
+@@ -792,6 +832,12 @@ RuntimeRunResult Runtime::Run() {
    m_impl->booted = true;
    m_impl->present_hook =
        GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
@@ -148,7 +153,7 @@ index f9b5405..5cb2de7 100644
                                                     std::memory_order_relaxed);
          m_impl->automation_state.present_count.store(info.present_count,
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..15afa7a 100644
+index 6bb9e0e..f2ad6d4 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -21,6 +21,42 @@ int main() {
@@ -250,6 +255,15 @@ index 6bb9e0e..15afa7a 100644
    moderngekko::frontend::ConfigResult netplay_config = loaded;
    netplay_config.graphics_backend = "OpenGL";
    netplay_config.fullscreen = true;
+@@ -89,7 +174,7 @@ int main() {
+   }
+ #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+   if (!generated.contains("Buttons/A = `Button A`\n") ||
+-      !generated.contains("Buttons/Z = `Shoulder R`\n") ||
++      !generated.contains("Buttons/Z = `Shoulder R` | `Shoulder L` | Back\n") ||
+       !generated.contains("Main Stick/Up = `Left Y+`\n") ||
+       !generated.contains("C-Stick/Up = `Right Y+`\n") ||
+       !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
 @@ -114,6 +199,31 @@ int main() {
  #endif
  
@@ -294,7 +308,7 @@ index 6bb9e0e..15afa7a 100644
    return 0;
  }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..b6f815b 100644
+index 03740d4..d4123c7 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -497,19 +511,40 @@ index 03740d4..b6f815b 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -375,8 +505,10 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -375,24 +505,30 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "Device = " << controllers[i] << '\n'
             << "Buttons/A = `Button A`\n"
                "Buttons/B = `Button B`\n"
 -              "Buttons/X = `Button X`\n"
 -              "Buttons/Y = `Button Y`\n"
+-              "Buttons/Z = `Shoulder R`\n"
 +           << (LoadConfig(user_directory, false).boost_on_x
 +                   ? "Buttons/X = `Button Y`\nButtons/Y = `Button X`\n"
 +                   : "Buttons/X = `Button X`\nButtons/Y = `Button Y`\n")
 +           <<
-               "Buttons/Z = `Shoulder R`\n"
++              "Buttons/Z = `Shoulder R` | `Shoulder L` | Back\n"
                "Buttons/Start = Start\n"
                "Main Stick/Up = `Left Y+`\n"
+               "Main Stick/Down = `Left Y-`\n"
+               "Main Stick/Left = `Left X-`\n"
+               "Main Stick/Right = `Left X+`\n"
++              "Main Stick/Deadzone = 5.00\n"
+               "Main Stick/Calibration = 100.00\n"
+               "C-Stick/Up = `Right Y+`\n"
+               "C-Stick/Down = `Right Y-`\n"
+               "C-Stick/Left = `Right X-`\n"
+               "C-Stick/Right = `Right X+`\n"
++              "C-Stick/Deadzone = 5.00\n"
+               "C-Stick/Calibration = 100.00\n"
+               "Triggers/L = `Trigger L`\n"
+               "Triggers/R = `Trigger R`\n"
+               "Triggers/L-Analog = `Trigger L`\n"
+               "Triggers/R-Analog = `Trigger R`\n"
++              "Triggers/Deadzone = 5.00\n"
++              "Triggers/Threshold = 85.00\n"
+               "D-Pad/Up = `Pad N`\n"
+               "D-Pad/Down = `Pad S`\n"
+               "D-Pad/Left = `Pad W`\n"
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
 index 3b18d05..5966bb4 100644
 --- a/tools/frontend_config.hpp
@@ -566,7 +601,7 @@ index 3b18d05..5966bb4 100644
  bool GenerateControllerConfig(const std::filesystem::path &user_directory,
                                std::span<const std::string> controllers,
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..61b4bec 100644
+index 7699c3d..a34ec30 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -4,6 +4,7 @@
@@ -962,7 +997,7 @@ index 7699c3d..61b4bec 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -1012,6 +1234,28 @@ int main(int argc, char** argv)
+@@ -1012,11 +1234,37 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -991,7 +1026,16 @@ index 7699c3d..61b4bec 100644
      ImGui::TextUnformatted("Netplay");
      ImGui::SetNextItemWidth(220 * scale);
      ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
-@@ -1027,24 +1271,72 @@ int main(int argc, char** argv)
++    if (ImGui::IsItemActivated()) SDL_StartTextInput(window);
++    if (ImGui::IsItemDeactivated()) SDL_StopTextInput(window);
+     ImGui::SetNextItemWidth(220 * scale);
+     ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
++    if (ImGui::IsItemActivated()) SDL_StartTextInput(window);
++    if (ImGui::IsItemDeactivated()) SDL_StopTextInput(window);
+     ImGui::SetNextItemWidth(120 * scale);
+     ImGui::InputInt("UDP port", &netplay_port);
+     netplay_port = std::clamp(netplay_port, 1, 65535);
+@@ -1027,24 +1275,72 @@ int main(int argc, char** argv)
        ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
      }
      ImGui::Spacing();
@@ -1075,7 +1119,7 @@ index 7699c3d..61b4bec 100644
        }
        if (selected_image)
        {
-@@ -1090,16 +1382,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1386,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -1147,7 +1191,7 @@ index 7699c3d..61b4bec 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1465,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1469,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -1158,7 +1202,7 @@ index 7699c3d..61b4bec 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1201,9 +1552,29 @@ int main(int argc, char** argv)
+@@ -1201,9 +1556,29 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -1190,7 +1234,7 @@ index 7699c3d..61b4bec 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1266,6 +1637,8 @@ int main(int argc, char** argv)
+@@ -1266,6 +1641,8 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
@@ -1254,3 +1298,9 @@ index d6b3569..3def4cb 100644
    if (netplay_role) {
      moderngekko::frontend::NetplayOptions options;
      options.role = *netplay_role;
+diff --git a/vendor/dolphin b/vendor/dolphin
+--- a/vendor/dolphin
++++ b/vendor/dolphin
+@@ -1 +1 @@
+-Subproject commit 10f7ac4fe48f74485fbc161ebf4d67242e11e671
++Subproject commit 10f7ac4fe48f74485fbc161ebf4d67242e11e671-dirty

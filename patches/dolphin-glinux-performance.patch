@@ -1,3 +1,31 @@
+diff --git a/Data/Sys/GameSettings/GFZE01.ini b/Data/Sys/GameSettings/GFZE01.ini
+index 6d5afdc..d180c81 100644
+--- a/Data/Sys/GameSettings/GFZE01.ini
++++ b/Data/Sys/GameSettings/GFZE01.ini
+@@ -2,6 +2,11 @@
+ 
+ [OnFrame]
+ # Add memory patches to be applied every frame here.
++$Default Native 16:9 Widescreen on New Save
++0x8027DC0C:dword:0x38600001:0x4BFE3AED
++
++[OnFrame_Enabled]
++$Default Native 16:9 Widescreen on New Save
+ 
+ [ActionReplay]
+ # Add action replay cheats here.
+diff --git a/Source/Core/Core/Host.h b/Source/Core/Core/Host.h
+index 5763950..f08e7bc 100644
+--- a/Source/Core/Core/Host.h
++++ b/Source/Core/Core/Host.h
+@@ -45,6 +45,7 @@ enum class HostMessageID
+   // Begin at 10 in case there is already messages with wParam = 0, 1, 2 and so on
+   WMUserStop = 10,
+   WMUserJobDispatch,
++  WMUserConfirmExit,
+ };
+ 
+ std::vector<std::string> Host_GetPreferredLocales();
 diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
 index e3581cc..4ec6b7d 100644
 --- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
@@ -225,3 +253,38 @@ index 8d0ae0c..0e01bb2 100644
        }
        else if (key == XK_F10)
        {
+diff --git a/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp b/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp
+index 5aeb9e0..5b5ade9 100644
+--- a/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp
++++ b/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp
+@@ -19,6 +19,7 @@
+ #include "Common/Thread.h"
+ 
+ #include "Core/Config/MainSettings.h"
++#include "Core/Host.h"
+ #include "Core/HW/SI/SI.h"
+ #include "Core/HW/SI/SI_Device.h"
+ 
+@@ -296,6 +297,22 @@ bool InputBackend::HandleEventAndContinue(const SDL_Event& e)
+              static_cast<const Gamepad*>(device)->GetSDLInstanceID() == e.jdevice.which;
+     });
+   }
++  else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
++  {
++    if (e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)
++    {
++      Host_Message(HostMessageID::WMUserConfirmExit);
++    }
++    else if (e.gbutton.button == SDL_GAMEPAD_BUTTON_START || e.gbutton.button == SDL_GAMEPAD_BUTTON_BACK)
++    {
++      SDL_Gamepad* pad = SDL_GetGamepadFromID(e.gbutton.which);
++      if (pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START) &&
++          SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK))
++      {
++        Host_Message(HostMessageID::WMUserConfirmExit);
++      }
++    }
++  }
+   else if (e.type == m_populate_event_type)
+   {
+     GetControllerInterface().PlatformPopulateDevices([this] {

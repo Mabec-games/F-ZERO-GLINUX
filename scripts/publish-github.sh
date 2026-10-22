@@ -8,7 +8,7 @@ owner="$(gh api user --jq .login)"
 [[ "$owner" == Mabec-games ]] || { echo "Expected Mabec-games account; logged in as $owner. Switch accounts with gh auth switch." >&2; exit 1; }
 repo="$owner/F-ZERO-GLINUX"
 # Explicit paths avoid adding disc images, builds, saves or unrelated workspace files.
-git add -- .gitignore README.md GLINUX.md docs assets packaging patches scripts
+git add -- .gitignore README.md GLINUX.md docs assets packaging patches scripts .github
 if ! git diff --cached --quiet; then
     git -c user.name="$owner" -c user.email="$owner@users.noreply.github.com" \
         commit -m 'Introduce F-ZERO GLINUX launcher, Linux packages and project presentation'
