@@ -35,7 +35,7 @@ not included. Performance and available AA modes depend on your hardware.
 
 <p align="center">
   <img src="docs/images/race-finish.png" alt="A first-place finish in F-ZERO GX" width="100%">
-  <br><em>One more race.</em>
+  <br><em>Alright, First place!</em>
 </p>
 
 ## Choose your package
