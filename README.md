@@ -164,7 +164,7 @@ newer host can raise the resulting AppImage's minimum system requirements.
 | Word-based private matchmaking | Not implemented |
 
 Report problems with your package type, distro, graphics backend, GPU and gamepad,
-along with the relevant log. Avoid including your game image or personal saves.
+along with the relevant log. 
 
 ## Credits
 
