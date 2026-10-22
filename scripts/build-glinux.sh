@@ -29,16 +29,11 @@ elif ! git -C "$launcher_source" apply --reverse --check "$launcher_patch" 2>/de
 fi
 
 protocols="$root/lib/ModernGekko/vendor/dolphin/Externals/SDL/SDL/wayland-protocols"
-protocol_args=()
-# Use the matching XML files already carried by SDL if the system package
-# is absent. Keep system files preferred when they are installed.
-if [[ ! -f /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml ]]; then
-    protocol_args+=(
-        "-DMODERNGEKKO_XDG_SHELL_XML=$protocols/xdg-shell.xml"
-        "-DMODERNGEKKO_XDG_DECORATION_XML=$protocols/xdg-decoration-unstable-v1.xml"
-        "-DMODERNGEKKO_IDLE_INHIBIT_XML=$protocols/idle-inhibit-unstable-v1.xml"
-    )
-fi
+protocol_args=(
+    "-DMODERNGEKKO_XDG_SHELL_XML=$protocols/xdg-shell.xml"
+    "-DMODERNGEKKO_XDG_DECORATION_XML=$protocols/xdg-decoration-unstable-v1.xml"
+    "-DMODERNGEKKO_IDLE_INHIBIT_XML=$protocols/idle-inhibit-unstable-v1.xml"
+)
 
 cmake -S lib/ModernGekko -B lib/ModernGekko/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \

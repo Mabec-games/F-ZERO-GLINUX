@@ -222,10 +222,67 @@ index 5b0729a..2d145fc 100644
    Common::Flag m_shutdown_requested{false};
    Common::Flag m_tried_graceful_shutdown{false};
 diff --git a/Source/Core/DolphinNoGUI/PlatformWayland.cpp b/Source/Core/DolphinNoGUI/PlatformWayland.cpp
-index f7e1ca2..ef144b5 100644
+index f7e1ca2..2ae49aa 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWayland.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformWayland.cpp
-@@ -617,9 +617,9 @@ bool PlatformWayland::ModifierActive(const char* name) const
+@@ -54,8 +54,12 @@ public:
+   static void ToplevelConfigure(void* data, xdg_toplevel*, int32_t width, int32_t height,
+                                 wl_array* states);
+   static void ToplevelClose(void* data, xdg_toplevel*);
++#ifdef XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION
+   static void ToplevelConfigureBounds(void*, xdg_toplevel*, int32_t, int32_t) {}
++#endif
++#ifdef XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION
+   static void ToplevelWmCapabilities(void*, xdg_toplevel*, wl_array*) {}
++#endif
+ 
+   static void SeatCapabilities(void* data, wl_seat* seat, uint32_t capabilities);
+   static void SeatName(void*, wl_seat*, const char*) {}
+@@ -79,8 +83,12 @@ public:
+   static void PointerAxisSource(void*, wl_pointer*, uint32_t) {}
+   static void PointerAxisStop(void*, wl_pointer*, uint32_t, uint32_t) {}
+   static void PointerAxisDiscrete(void*, wl_pointer*, uint32_t, int32_t) {}
++#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+   static void PointerAxisValue120(void*, wl_pointer*, uint32_t, int32_t) {}
++#endif
++#ifdef WL_POINTER_AXIS_RELATIVE_DIRECTION_SINCE_VERSION
+   static void PointerAxisRelativeDirection(void*, wl_pointer*, uint32_t, uint32_t) {}
++#endif
+ 
+ private:
+   void ApplyPendingTitle();
+@@ -133,8 +141,15 @@ constexpr wl_registry_listener s_registry_listener = {PlatformWayland::RegistryG
+ constexpr xdg_wm_base_listener s_wm_base_listener = {PlatformWayland::WmBasePing};
+ constexpr xdg_surface_listener s_surface_listener = {PlatformWayland::SurfaceConfigure};
+ constexpr xdg_toplevel_listener s_toplevel_listener = {
+-    PlatformWayland::ToplevelConfigure, PlatformWayland::ToplevelClose,
+-    PlatformWayland::ToplevelConfigureBounds, PlatformWayland::ToplevelWmCapabilities};
++    PlatformWayland::ToplevelConfigure,
++    PlatformWayland::ToplevelClose,
++#ifdef XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION
++    PlatformWayland::ToplevelConfigureBounds,
++#endif
++#ifdef XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION
++    PlatformWayland::ToplevelWmCapabilities,
++#endif
++};
+ constexpr wl_seat_listener s_seat_listener = {PlatformWayland::SeatCapabilities,
+                                               PlatformWayland::SeatName};
+ constexpr wl_keyboard_listener s_keyboard_listener = {
+@@ -151,8 +166,12 @@ constexpr wl_pointer_listener s_pointer_listener = {
+     PlatformWayland::PointerAxisSource,
+     PlatformWayland::PointerAxisStop,
+     PlatformWayland::PointerAxisDiscrete,
++#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+     PlatformWayland::PointerAxisValue120,
++#endif
++#ifdef WL_POINTER_AXIS_RELATIVE_DIRECTION_SINCE_VERSION
+     PlatformWayland::PointerAxisRelativeDirection,
++#endif
+ };
+ 
+ PlatformWayland::~PlatformWayland()
+@@ -617,9 +636,9 @@ bool PlatformWayland::ModifierActive(const char* name) const
  void PlatformWayland::HandleHotkey(xkb_keysym_t symbol)
  {
    auto& system = Core::System::GetInstance();
