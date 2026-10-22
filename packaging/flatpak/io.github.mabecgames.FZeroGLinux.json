@@ -1,0 +1,31 @@
+{
+  "app-id": "io.github.mabecgames.FZeroGLinux",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "26.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "fzero-glinux",
+  "finish-args": [
+    "--share=ipc",
+    "--share=network",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--socket=pulseaudio",
+    "--device=all",
+    "--filesystem=xdg-download:ro"
+  ],
+  "modules": [
+    {
+      "name": "fzero-glinux",
+      "buildsystem": "simple",
+      "build-commands": [
+        "bash flatpak/build-inside-sdk.sh"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "source"
+        }
+      ]
+    }
+  ]
+}

@@ -1,195 +1,185 @@
-# ModernGekko-Template
+<p align="center">
+  <img src="docs/images/promo.png" alt="F-ZERO GLINUX — futuristic racing on Linux" width="100%">
+</p>
 
-A template for building a static-recompilation pipeline for GameCube and Wii games, built on:
+<h1 align="center">F-ZERO GLINUX</h1>
+<p align="center"><strong>Choose your machine. Set your resolution. Hit the track.</strong><br>F-ZERO GX on Linux, with a controller-friendly launcher.</p>
+<p align="center">
+  <a href="#choose-your-package">AppImage & Flatpak</a> ·
+  <a href="#start-playing">Start playing</a> ·
+  <a href="#build-from-source">Build from source</a> ·
+  <a href="#project-status">Project status</a>
+</p>
 
-- [DolRecomp](https://github.com/ExpansionPak/DolRecomp) - static recompiler that turns a GameCube/Wii DOL into portable C or optimized native LLVM objects.
-- [ModernGekko](https://github.com/ExpansionPak/ModernGekko) - the runtime the recompiled C links against (built on a Dolphin-derived core for video/audio/HLE).
+F-ZERO GLINUX brings together a custom launcher, graphics settings and modern
+controller options around a Dolphin-derived runtime. The current playable
+preview uses **Dolphin JIT** through ModernGekko. Static recompilation remains
+experimental; these packages are not a completed static recompilation release.
 
-Both are pulled in as git submodules under `lib/`. Everything is handled through the top-level `Makefile`. This repo has no game-specific code of its own, so it's a starting point for standing up a recompilation project for any GameCube or Wii title you own.
+Bring your own **F-ZERO GX USA (GFZE01)** image in **ISO or RVZ** format. Game
+disc contents and personal memory-card saves are not included in the packages.
 
-## Using This Template
+## Built for the starting grid
 
-Click **Use this template** on GitHub (or fork/clone it directly) to create your own project repo. Nothing in the `Makefile` or submodule setup needs to change to point it at a different game, just pass a different `ISO=` the first time you run it. Rename the repo to whatever fits your project.
+- **Controller-friendly launcher** with racing artwork, gamepad navigation and clear loading feedback.
+- **Six resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1440p and 4K.
+- **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
+- **Boost on X:** optional X/Y swap for modern four-button gamepads.
+- **Native widescreen:** use GX's own Screen Mode setting, saved on your memory card.
+- **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
+- **Separate user data:** saves and settings survive package updates.
 
-## Dependencies
+The current target is the game's normal **60 FPS** operation. Higher internal
+resolutions do not add detail to the original textures; an above-60-FPS mode is
+not included. Performance and available AA modes depend on your hardware.
 
-CMake, Ninja, and pkg-config, plus a C11/C++23 toolchain. DolRecomp and ModernGekko both build on macOS, Linux, and Windows; this repo's `Makefile` doesn't do anything platform-specific itself, it just drives the same CMake builds each submodule supports natively. `TOOLCHAIN` (see below) follows the compiler used to build ModernGekko.
+<p align="center">
+  <img src="docs/images/race-finish.png" alt="A first-place finish in F-ZERO GX" width="100%">
+  <br><em>One more race.</em>
+</p>
 
-### Linux
+## Choose your package
 
-Ubuntu/Debian, matching what `lib/ModernGekko/vendor/dolphin`'s own CI installs for its NoGUI build (`.github/workflows/build.yml`):
+**Both packages use SDL3. There is no SDL2 variant in this repository.** SDL is
+used for controller input and the launcher; AppImage and Flatpak are packaging
+formats, not different SDL versions. Neither package needs a separate host SDL2
+installation. Both use the same launcher and Dolphin JIT gameplay backend.
 
-```
-sudo apt-get install -y ninja-build build-essential pkg-config cmake \
-  libevdev-dev libudev-dev libgtk-3-dev libsystemd-dev \
-  libbluetooth-dev libasound2-dev libpulse-dev libgl1-mesa-dev \
-  libxrandr-dev libxi-dev
-```
+| | AppImage | Flatpak |
+|---|---|---|
+| Start | Make executable, then open the file | Install once, then open from your app menu |
+| Dependencies | Bundled libraries plus the host's base system | Application built inside a matching Freedesktop SDK; uses its Platform runtime |
+| Current compatibility | Local preview requires **glibc 2.44+ and x86-64-v3** | Avoids that host-glibc dependency by using Freedesktop **26.08** |
+| Best fit | Compatible, recent Linux systems; portable single-file launch | The preferred candidate for older distros and Bazzite testing |
+| Game import | Browse to your own ISO/RVZ | Put the ISO/RVZ in Downloads, which the sandbox can read |
+| Save location | `~/.local/share/fzero-glinux` by default | `~/.var/app/io.github.mabecgames.FZeroGLinux/data/fzero-glinux` |
 
-`build-essential` pulls in GCC, the default toolchain on Linux.
+Both builds have been confirmed working by the project owner on the development
+machine. This is **not** a claim that every Arch, Debian, Bazzite or Steam Deck
+configuration has been tested. Flatpak still needs a supported host kernel,
+Flatpak installation and compatible graphics drivers. Its runtime may be
+downloaded the first time you install the application.
 
-### macOS
+The two packages keep separate profiles. Switching package formats does not
+automatically transfer your saves.
 
-Via Homebrew:
+## Start playing
 
-```
-brew install cmake ninja pkg-config
-```
+The filenames below refer to the current preview artifacts. When building locally,
+find them in `dist/`. See [Releases](https://github.com/Mabec-games/F-ZERO-GLINUX/releases)
+for any published downloads; source publication does not automatically publish binaries.
 
-Xcode's command line tools are also required (AppleClang 14.0.3+; verified on AppleClang 17).
+### AppImage
 
-### Windows
-
-Visual Studio 2022 (or the standalone Build Tools) with the "Desktop development with C++" workload, for the MSVC toolchain, plus CMake and Ninja on `PATH` (installable via winget/Chocolatey or their own installers). No external package manager is needed beyond that. Dolphin's Windows dependency tree (FFmpeg, SDL, etc.) is vendored as prebuilt binaries/source under `lib/ModernGekko/vendor/dolphin/Externals/`, unlike Linux where system `-dev` packages are expected.
-
-## Getting the Source
-
-```
-git clone --recurse-submodules https://github.com/<your-org>/<your-repo>.git
-cd <your-repo>
-```
-
-If you already cloned without `--recurse-submodules`, `make` will fetch them for you on first run. To do it manually instead:
-
-```
-git submodule update --init --recursive
-```
-
-Run the build check at any time with:
-
-```
-make check
-```
-
-It verifies CMake, Ninja, Git, Python, working C11/C++23 compilers, and a
-64-bit target with 8-byte pointers. If the source submodules are absent, it
-offers to fetch them. Use `make check FETCH=1` for a non-interactive fetch,
-or `make check BACKEND=llvm` to validate LLVM 19/20 as well.
-
-> [!NOTE]
-> `lib/ModernGekko` vendors a large chunk of Dolphin's dependency tree (SDL, fmt, imgui, Vulkan headers, etc.), so the first submodule sync takes a while and pulls a few hundred MB.
-
-## Recompile and Run
-
-Bring your own legally-owned ISO, no game data is included in or downloaded by this repository. Works with any GameCube or Wii disc; there is no default game, so `ISO=` (or an already-extracted `GAME=`) is required. Point `ISO` at a dump and run:
-
-```
-make run ISO=/path/to/Your\ Game.iso
-```
-
-This builds DolRecomp and ModernGekko, extracts the ISO, recompiles `main.dol` to C, compiles the result into a native module, and launches the game in a window.
-
-For the optimized LLVM backend:
-
-```
-make llvm-run ISO=/path/to/Your\ Game.iso
+```bash
+chmod +x F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage
+./F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage
 ```
 
-`make llvm` builds the module without launching it. DolRecomp emits native
-objects, and RecompCore's module template discovers the generated object
-manifest and links every object into the game module automatically. LLVM is
-only needed while building; the resulting game module has no LLVM runtime
-dependency.
+If FUSE is unavailable, run:
 
-Each game gets its own directory under `extracted/<slug>/`, where `<slug>` is derived from the ISO's filename, so multiple games coexist without clobbering each other. `ISO` is only needed the first time per game, once extracted, run it again by slug instead:
-
-```
-make run ISO=iso/Your\ Game.iso        # first time for a new game
-make run GAME=Your-Game-Slug           # afterwards
+```bash
+./F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage --appimage-extract-and-run
 ```
 
-Drop ISOs under `iso/` at the repo root (gitignored) for a stable local path.
+This particular AppImage cannot run on hosts with glibc older than 2.44.
+See [AppImage packaging and compatibility](packaging/README.md).
 
-To just build the tools without touching a game, or to produce the compiled module without launching it:
+### Flatpak
 
-```
-make tools
-make recompile ISO=/path/to/game.iso
-```
+With Flatpak and the Flathub remote available:
 
-`moderngekko-port` caches compiled modules by DOL hash and toolchain identity, so re-running `recompile`/`run` after the first build is cheap, it hits cache instead of recompiling.
-
-> [!NOTE]
-> Wii ISOs need [Wiimms ISO Tools](https://wit.wiimm.de/) (`wit`) for extraction, `make` downloads it automatically into `extern/wit` on first use. GameCube extraction is built into DolRecomp directly and doesn't need this.
-
-## Makefile Targets
-
-Run `make help` (or just `make`, the default target) for this list:
-
-| Target       | Description                                                |
-|--------------|--------------------------------------------------------------|
-| `check`      | Validate build tools, compilers, architecture, and sources  |
-| `tools`      | Build DolRecomp and ModernGekko                             |
-| `extract`    | Extract a GameCube/Wii ISO into `extracted/<slug>/`         |
-| `recompile`  | Recompile + compile a runnable module                       |
-| `run`        | Recompile (if needed) and launch the game                   |
-| `llvm`       | Build an optimized LLVM object module                       |
-| `llvm-run`   | Build an LLVM object module and launch the game             |
-| `clean`      | Remove all build output                                     |
-
-## Variables
-
-| Variable           | Default                                    | Description                                              |
-|--------------------|--------------------------------------------|----------------------------------------------------------|
-| `ISO`              | *(none)*                                   | Path to a game ISO. Required the first time per game, also determines that game's slug. |
-| `GAME`             | *(none)*                                   | Select an already-extracted game by slug instead of `ISO=`. Required if `ISO` isn't given. |
-| `JOBS`             | detected CPU count                         | Parallel build jobs passed to CMake/Ninja.                |
-| `CMAKE_BUILD_TYPE` | `Release`                                  | Passed to both submodule builds.                          |
-| `BUILD_TESTING`    | `OFF`                                      | Build developer test targets alongside production tools. |
-| `BACKEND`          | `c`                                        | Generated-code backend: `c` or `llvm`.                    |
-| `LLVM_DIR`         | *(CMake discovery)*                        | Optional path to LLVM 19/20's CMake package.              |
-| `RUN_ARGS`         | *(empty)*                                  | Extra flags forwarded to `moderngekko-run` via `make run`, e.g. `--headless`, `--graphics Vulkan`. |
-| `TOOLCHAIN`        | `auto`                                      | Compiler for the per-game module: `auto`, `clang`, `gcc`, or `msvc`. See "Toolchain" below. |
-
-For example, to force a debug build with extra runner flags:
-
-```
-CMAKE_BUILD_TYPE=Debug make run ISO=/path/to/game.iso RUN_ARGS="--headless"
+```bash
+flatpak install --user ./F-ZERO-GLINUX-x86_64.flatpak
+flatpak run io.github.mabecgames.FZeroGLinux
 ```
 
-## LLVM Backend
+The app also appears in your desktop application menu after installation.
+This is a locally distributed bundle, not a Flathub store listing. To configure
+the runtime source if needed:
 
-DolRecomp supports LLVM 19 and 20. If it is installed outside CMake's normal
-search path, point the template at its package directory:
-
-```
-make llvm GAME=Your-Game-Slug LLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm
-make llvm-run GAME=Your-Game-Slug LLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm
+```bash
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 ```
 
-The portable C backend remains the default and is always available:
+### First launch
 
-```
-make recompile GAME=Your-Game-Slug BACKEND=c
-```
+1. Select **Browse for ISO / RVZ** and import your USA game image. For Flatpak, use Downloads.
+2. Open **Controller**, choose your gamepad and optionally enable **Boost on X**.
+3. Choose your graphics settings, then press **PLAY**. The loading screen stays visible while the game starts.
+4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 display setting in the launcher.
 
-## Toolchain
+To exit a race, press **Escape**, then use the D-pad and A/B on the confirmation
+window. Offline play pauses while the prompt is open; an online session keeps
+running. A controller shortcut to *open* this prompt is not currently documented
+as supported—Steam Deck users can map a button to Escape through Steam Input.
 
-The default `TOOLCHAIN=auto` follows the compiler used to build `moderngekko-port`.
-This keeps an MSVC build on MSVC and an MSYS2/MinGW build on GCC or Clang instead
-of assuming that Visual Studio's `cl` is available.
+<p align="center">
+  <img src="docs/images/machine-settings.png" alt="Pico and the Wild Goose on the machine settings screen" width="85%">
+  <br><em>Fine-tune your machine before the race.</em>
+</p>
 
-Override it either way with `TOOLCHAIN=`:
+## Build from source
 
-```
-make run ISO=/path/to/game.iso TOOLCHAIN=clang   # try clang on Linux anyway
-make run ISO=/path/to/game.iso TOOLCHAIN=auto    # let moderngekko-port pick
-```
-
-Module builds are cached by DOL hash *and* toolchain identity, so switching `TOOLCHAIN` between runs produces a separate cache entry rather than clobbering a previous build.
-
-## Controller Input
-
-ModernGekko has no in-app controller configuration UI (same as Dolphin's NoGUI frontend it's built on), bindings come from `Config/GCPadNew.ini` / `Config/WiimoteNew.ini` in ModernGekko's user directory (`~/.local/share/moderngekko/Config/` by default), which nothing in this pipeline creates for you. Without one, GameCube pad input silently does nothing. You'll need to hand-author or copy in a working ini, Dolphin's ini format and key names are stable and documented by the project itself.
-
-## Cleaning Up
-
-```
-make clean           # everything below
-make clean-extracted # extracted disc + compiled modules only, keeps built tools
-make clean-tools     # DolRecomp/ModernGekko build trees only
+```bash
+git clone --recurse-submodules https://github.com/Mabec-games/F-ZERO-GLINUX.git
+cd F-ZERO-GLINUX
 ```
 
-## License
+The project pins upstream submodules and carries its changes as patches. The
+build scripts apply those patches; generated game modules are not committed.
 
-DolRecomp and ModernGekko are each distributed under their own upstream licenses (see `lib/DolRecomp/LICENSE` and `lib/ModernGekko/LICENSE`, the latter GPL-3.0-or-later due to its Dolphin-derived runtime). No Nintendo disc image, extracted game data, keys, or copyrighted assets are part of this repository, bring your own legally-owned dump.
+**Flatpak:** install `flatpak`, `flatpak-builder`, Python 3 and Git, then:
+
+```bash
+flatpak install --user flathub org.freedesktop.Sdk//26.08 org.freedesktop.Platform//26.08
+JOBS=4 bash scripts/build-flatpak.sh
+```
+
+This compiles inside the SDK rather than reusing host binaries. See the
+[Flatpak build guide](packaging/flatpak/README.md) for permissions and troubleshooting.
+
+**AppImage:** with a C++23 toolchain, CMake, Ninja and the development dependencies
+installed, build the runtime and package it using `linuxdeploy`:
+
+```bash
+bash scripts/build-glinux.sh
+bash scripts/package-appimage.sh
+```
+
+See the [AppImage build guide](packaging/README.md) and
+[upstream template's dependency notes](docs/UPSTREAM-TEMPLATE.md). Building on a
+newer host can raise the resulting AppImage's minimum system requirements.
+
+## Project status
+
+| Area | Status |
+|---|---|
+| AppImage and Flatpak | Working on the project owner's development machine |
+| JIT gameplay | Playable; smooth 60 FPS reported on that machine |
+| Static recompilation | Experimental; performance work remains |
+| Native widescreen | In-game setting; remembered in the player's save |
+| Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
+| Netplay | Experimental host/join controls; cross-machine validation remains |
+| Word-based private matchmaking | Not implemented |
+
+Report problems with your package type, distro, graphics backend, GPU and gamepad,
+along with the relevant log. Avoid including your game image or personal saves.
+
+## Credits
+
+Project presentation and Linux launcher work by **Mabec Games**.
+
+Built on [ModernGekko](https://github.com/ExpansionPak/ModernGekko),
+[DolRecomp](https://github.com/ExpansionPak/DolRecomp) and
+[Dolphin](https://github.com/dolphin-emu/dolphin), starting from
+[ModernGekko-Template](https://github.com/ExpansionPak/ModernGekko-Template).
+Upstream components retain their respective licenses and attribution; see their
+submodules and the notices included with packaged builds. F-ZERO GX, its imagery
+and related trademarks belong to their respective owners. This is an independent
+fan project, not an official Nintendo or SEGA release.
+
+<p align="center">
+  <img src="docs/images/logo.png" alt="F-ZERO GLINUX" width="460">
+  <br><strong>See you on the starting grid.</strong>
+</p>

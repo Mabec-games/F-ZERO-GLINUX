@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=F-ZERO GLINUX
+Comment=F-ZERO GX Linux launcher (Dolphin JIT preview)
+Exec=fzero-glinux
+Icon=io.github.mabecgames.FZeroGLinux
+Terminal=false
+Categories=Game;

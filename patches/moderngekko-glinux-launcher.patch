@@ -1,0 +1,1256 @@
+diff --git a/include/moderngekko/runtime.hpp b/include/moderngekko/runtime.hpp
+index 0adc855..49327ac 100644
+--- a/include/moderngekko/runtime.hpp
++++ b/include/moderngekko/runtime.hpp
+@@ -4,6 +4,7 @@
+ #include "moderngekko/module_abi.h"
+ 
+ #include <filesystem>
++#include <functional>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -32,6 +33,12 @@ struct GraphicsSettings
+ {
+   std::string backend;
+   std::optional<int> internal_resolution_scale;
++  int output_width = 0;
++  int output_height = 0;
++  bool vsync = false;
++  std::string anti_aliasing = "off";
++  int anisotropy = 1;
++  std::string aspect_ratio; // Empty preserves Dolphin configuration.
+ };
+ 
+ struct AudioSettings
+@@ -59,6 +66,8 @@ enum class WindowSystem
+ 
+ struct RuntimeConfig
+ {
++  std::function<bool(bool online)> confirm_exit;
++  std::filesystem::path startup_ready_file;
+   std::filesystem::path game_root;
+   std::filesystem::path user_directory;
+   ModuleSource module;
+diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
+index f9b5405..5cb2de7 100644
+--- a/src/runtime/dolphin_runtime.cpp
++++ b/src/runtime/dolphin_runtime.cpp
+@@ -13,6 +13,7 @@
+ #include "Core/HW/Memmap.h"
+ #include "Core/Host.h"
+ #include "Core/NetPlay/NetPlayClient.h"
++#include "Core/NetPlay/NetPlayProto.h"
+ #include "Core/PowerPC/JitInterface.h"
+ #include "Core/PowerPC/PowerPC.h"
+ #include "Core/PowerPC/StaticRecomp/StaticRecompModuleSource.h"
+@@ -55,6 +56,7 @@ bool s_runtime_active = false;
+ Platform *s_platform = nullptr;
+ std::string s_window_title;
+ bool s_show_fps_in_title = true;
++std::atomic<bool> s_exit_dialog_open{false};
+ bool s_external_ui_common = false;
+ std::unique_ptr<BootSessionData> s_boot_session_data;
+ u64 s_previous_net_wait_ns = 0;
+@@ -113,7 +115,7 @@ PowerPC::CPUCore SelectCPUCore() {
+ std::vector<std::string> Host_GetPreferredLocales() { return {}; }
+ void Host_PPCSymbolsChanged() {}
+ void Host_PPCBreakpointsChanged() {}
+-bool Host_UIBlocksControllerState() { return false; }
++bool Host_UIBlocksControllerState() { return s_exit_dialog_open.load(); }
+ void Host_Message(HostMessageID id) {
+   if (id == HostMessageID::WMUserStop && s_platform)
+     s_platform->Stop();
+@@ -514,6 +516,7 @@ struct Runtime::Impl {
+   RuntimeAutomationState automation_state;
+   Common::EventHook present_hook;
+   bool automation_registered = false;
++  bool startup_ready_sent = false;
+   std::jthread automation_thread;
+ };
+ 
+@@ -569,7 +572,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+   else if (config.module.kind == ModuleSource::Kind::AttachedDescriptor)
+     module_result =
+         validation_library.Attach(config.module.descriptor, requirements);
+-  else if (!config.allow_interpreter)
++  else if (!config.allow_interpreter && SelectCPUCore() == PowerPC::CPUCore::StaticRecomp)
+     return {
+         {},
+         RuntimeError{
+@@ -613,6 +616,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+     impl->ui_initialized = true;
+   }
+   Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
++  if (impl->config.graphics.output_width > 0 && impl->config.graphics.output_height > 0) {
++    Config::SetBase(Config::MAIN_RENDER_WINDOW_WIDTH, impl->config.graphics.output_width);
++    Config::SetBase(Config::MAIN_RENDER_WINDOW_HEIGHT, impl->config.graphics.output_height);
++    Config::SetBase(Config::MAIN_RENDER_WINDOW_AUTOSIZE, false);
++  }
+ 
+   if (impl->config.headless)
+     impl->platform = Platform::CreateHeadlessPlatform();
+@@ -639,6 +647,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+                          "the requested Dolphin host platform is unavailable"}};
+   }
+ 
++  if (impl->config.confirm_exit) {
++    impl->platform->SetExitConfirmation([state = impl.get()] {
++      auto &system = Core::System::GetInstance();
++      const bool online = NetPlay::IsNetPlayRunning();
++      const bool resume = !online && Core::GetState(system) == Core::State::Running;
++      s_exit_dialog_open.store(true);
++      if (resume) Core::SetState(system, Core::State::Paused);
++      const bool confirmed = state->config.confirm_exit(online);
++      s_exit_dialog_open.store(false);
++      if (!confirmed && resume && Core::GetState(system) == Core::State::Paused)
++        Core::SetState(system, Core::State::Running);
++      return confirmed;
++    });
++  }
+   const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
+   UICommon::InitControllers(wsi);
+   impl->controllers_initialized = true;
+@@ -665,6 +687,22 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+   if (impl->config.graphics.internal_resolution_scale)
+     Config::SetBase(Config::GFX_EFB_SCALE,
+                     *impl->config.graphics.internal_resolution_scale);
++  if (!impl->config.graphics.aspect_ratio.empty()) {
++    Config::SetBase(Config::GFX_ASPECT_RATIO,
++                    impl->config.graphics.aspect_ratio == "16:9"
++                        ? AspectMode::ForceWide : AspectMode::ForceStandard);
++    Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
++  }
++  Config::SetBase(Config::GFX_VSYNC, impl->config.graphics.vsync);
++  Config::SetBase(Config::GFX_MSAA, impl->config.graphics.anti_aliasing == "msaa4" ? 4u : 1u);
++  Config::SetBase(Config::GFX_SSAA, false);
++  Config::SetBase(Config::GFX_ENHANCE_POST_SHADER,
++                  std::string(impl->config.graphics.anti_aliasing == "fxaa" ? "FXAA" : ""));
++  int anisotropy_mode = 0;
++  for (int value = impl->config.graphics.anisotropy; value > 1; value >>= 1)
++    ++anisotropy_mode;
++  Config::SetBase(Config::GFX_ENHANCE_MAX_ANISOTROPY,
++                  static_cast<AnisotropicFilteringMode>(anisotropy_mode));
+   Config::SetBase(Config::GFX_SHADER_CACHE, true);
+   Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
+                   ShaderCompilationMode::AsynchronousUberShaders);
+@@ -792,6 +830,12 @@ RuntimeRunResult Runtime::Run() {
+   m_impl->booted = true;
+   m_impl->present_hook =
+       GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
++        if (!m_impl->startup_ready_sent && !m_impl->config.startup_ready_file.empty()) {
++          std::ofstream ready(m_impl->config.startup_ready_file);
++          ready << "ready\n";
++          ready.close();
++          m_impl->startup_ready_sent = static_cast<bool>(ready);
++        }
+         m_impl->automation_state.frame_count.store(info.frame_count,
+                                                    std::memory_order_relaxed);
+         m_impl->automation_state.present_count.store(info.present_count,
+diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
+index 6bb9e0e..15afa7a 100644
+--- a/tests/frontend_config_test.cpp
++++ b/tests/frontend_config_test.cpp
+@@ -21,6 +21,42 @@ int main() {
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+ 
+   std::string error;
++  const auto seed = directory / "template.gci";
++  fs::create_directories(directory);
++  std::string seed_bytes(64 + 4 * 8192, '\0');
++  seed_bytes.replace(0, 6, "GFZE8P");
++  seed_bytes.replace(8, 10, "f_zero.dat");
++  seed_bytes[0x39] = 4;
++  { std::ofstream output(seed, std::ios::binary); output << seed_bytes; }
++  const auto fresh = directory / "fresh";
++  const auto card = fresh / "GC/USA/Card A/8P-GFZE-f_zero.dat.gci";
++  if (!moderngekko::frontend::InitializeWidescreenProfile(fresh, seed, &error) ||
++      !fs::exists(card) ||
++      moderngekko::frontend::LoadConfig(fresh, false).aspect_ratio != "16:9")
++    return 40;
++  // Subsequent launches must neither reset preferences nor overwrite saves.
++  { std::ofstream output(card); output << "existing player progress"; }
++  auto fresh_config = moderngekko::frontend::LoadConfig(fresh, false);
++  fresh_config.aspect_ratio = "4:3";
++  if (!moderngekko::frontend::SaveConfig(fresh, fresh_config, &error) ||
++      !moderngekko::frontend::InitializeWidescreenProfile(fresh, seed, &error) ||
++      fs::file_size(card) != 24 ||
++      moderngekko::frontend::LoadConfig(fresh, false).aspect_ratio != "4:3")
++    return 41;
++  const auto existing = directory / "existing";
++  fs::create_directories(existing / "Config");
++  if (!moderngekko::frontend::InitializeWidescreenProfile(existing, seed, &error) ||
++      fs::exists(existing / "GC"))
++    return 42;
++  { std::ofstream output(seed); output << "invalid"; }
++  if (moderngekko::frontend::InitializeWidescreenProfile(directory / "invalid", seed, &error) ||
++      fs::exists(directory / "invalid/GC"))
++    return 43;
++  fs::remove(seed);
++  if (!moderngekko::frontend::InitializeWidescreenProfile(directory / "no-seed", seed, &error) ||
++      fs::exists(directory / "no-seed/GC"))
++    return 44;
++
+   const std::string controller = "SDL/0/Test Controller";
+   if (!moderngekko::frontend::SaveConfig(directory, "1920x1080", false,
+                                          controller, &error))
+@@ -33,6 +69,55 @@ int main() {
+     return 2;
+   }
+ 
++  if (!loaded.aspect_ratio.empty())
++    return 30; // Existing profiles must not silently become widescreen.
++  auto wide = loaded;
++  wide.aspect_ratio = "16:9";
++  if (!moderngekko::frontend::SaveConfig(directory, wide, &error) ||
++      !moderngekko::frontend::SaveConfig(directory, "1280x720", true, controller, &error) ||
++      moderngekko::frontend::LoadConfig(directory, false).aspect_ratio != "16:9")
++    return 31; // Resolution/controller updates preserve display choice.
++  wide.aspect_ratio = "4:3";
++  if (!moderngekko::frontend::SaveConfig(directory, wide, &error) ||
++      moderngekko::frontend::LoadConfig(directory, false).aspect_ratio != "4:3")
++    return 32;
++  wide.aspect_ratio = "invalid";
++  if (moderngekko::frontend::SaveConfig(directory, wide, &error))
++    return 33;
++  // New presets separate physical window size from EFB scale.
++  const auto &presets = moderngekko::frontend::SupportedResolutions();
++  if (presets.size() != 6 || std::string(presets[1].text) != "1280x800") return 50;
++  auto graphics = loaded;
++  graphics.resolution = "1280x800";
++  graphics.vsync = true;
++  graphics.anti_aliasing = "msaa4";
++  graphics.anisotropy = 16;
++  graphics.boost_on_x = true;
++  if (!moderngekko::frontend::SaveConfig(directory, graphics, &error)) return 51;
++  const auto deck = moderngekko::frontend::LoadConfig(directory, false);
++  if (!deck || deck.output_width != 1280 || deck.output_height != 800 ||
++      deck.dolphin_scale != 2 || !deck.vsync || deck.anti_aliasing != "msaa4" ||
++      deck.anisotropy != 16 || !deck.boost_on_x) return 52;
++  for (const auto &preset : presets) {
++    graphics.resolution = preset.text;
++    if (!moderngekko::frontend::SaveConfig(directory, graphics, &error)) return 53;
++    const auto read = moderngekko::frontend::LoadConfig(directory, false);
++    if (!read || read.output_width != preset.width || read.output_height != preset.height ||
++        read.dolphin_scale != preset.dolphin_scale) return 54;
++  }
++  for (const auto aa : {"off", "fxaa", "msaa4"}) {
++    graphics.anti_aliasing = aa;
++    if (!moderngekko::frontend::SaveConfig(directory, graphics, &error) ||
++        moderngekko::frontend::LoadConfig(directory, false).anti_aliasing != aa) return 55;
++  }
++  graphics.anti_aliasing = "bogus";
++  if (moderngekko::frontend::SaveConfig(directory, graphics, &error)) return 56;
++  graphics.anti_aliasing = "off";
++  graphics.anisotropy = 3;
++  if (moderngekko::frontend::SaveConfig(directory, graphics, &error)) return 57;
++  // Reject malformed values on disk too.
++  { std::ofstream out(directory / "config.ini"); out << "resolution=1280x800\nvsync=maybe\n"; }
++  if (moderngekko::frontend::LoadConfig(directory, false)) return 58;
+   moderngekko::frontend::ConfigResult netplay_config = loaded;
+   netplay_config.graphics_backend = "OpenGL";
+   netplay_config.fullscreen = true;
+@@ -114,6 +199,31 @@ int main() {
+ #endif
+ 
+ #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
++  const auto profile_path = directory / "Config" / CONTROLLER_CONFIG_NAME;
++  const auto read_profile = [&]() {
++    std::ifstream in(profile_path);
++    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++  };
++  if (!moderngekko::frontend::SetBoostLayout(directory, true, &error)) return 60;
++  const auto boosted = read_profile();
++  std::string expected = generated;
++  std::size_t pos = 0;
++  const std::string normal = "Buttons/X = `Button X`\nButtons/Y = `Button Y`\n";
++  const std::string swapped = "Buttons/X = `Button Y`\nButtons/Y = `Button X`\n";
++  while ((pos = expected.find(normal, pos)) != std::string::npos) {
++    expected.replace(pos, normal.size(), swapped);
++    pos += swapped.size();
++  }
++  if (boosted != expected) return 61; // Every other binding must be byte-identical.
++  if (!moderngekko::frontend::SetBoostLayout(directory, true, &error) ||
++      read_profile() != boosted) return 62;
++  if (!moderngekko::frontend::SetBoostLayout(directory, false, &error) ||
++      read_profile() != generated) return 63;
++  auto boosted_config = netplay_config;
++  boosted_config.boost_on_x = true;
++  if (!moderngekko::frontend::SaveConfig(directory, boosted_config, &error) ||
++      !moderngekko::frontend::GenerateControllerConfig(directory, netplay_config.controllers, &error) ||
++      read_profile() != expected) return 64;
+   const std::string custom =
+       "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
+ #else
+@@ -138,6 +248,10 @@ int main() {
+                                  directory) != "SDL/9/Custom Controller")
+     return 12;
+ 
++#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
++  if (moderngekko::frontend::SetBoostLayout(directory, true, &error) ||
++      read_profile() != custom) return 65;
++#endif
+   fs::remove_all(directory);
+   return 0;
+ }
+diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
+index 03740d4..b6f815b 100644
+--- a/tools/frontend_config.cpp
++++ b/tools/frontend_config.cpp
+@@ -4,6 +4,7 @@
+ #include <cctype>
+ #include <charconv>
+ #include <fstream>
++#include <array>
+ #include <string_view>
+ 
+ namespace fs = std::filesystem;
+@@ -73,12 +74,52 @@ std::string_view ControllerSectionPrefix() {
+ 
+ } // namespace
+ 
++bool InitializeWidescreenProfile(const fs::path &user_directory,
++                                const fs::path &seed, std::string *error) {
++  try {
++    // Never seed an existing profile, even if its card happens to be empty.
++    // Existing Config can contain custom/raw memory-card paths.
++    if (fs::exists(user_directory / "config.ini") ||
++        fs::exists(user_directory / "Config") ||
++        fs::exists(user_directory / "GC") || !fs::exists(seed))
++      return true;
++    std::array<char, 64> header{};
++    std::ifstream input(seed, std::ios::binary);
++    input.read(header.data(), header.size());
++    if (!input || std::string_view(header.data(), 6) != "GFZE8P" ||
++        std::string_view(header.data() + 8, 11) != std::string_view("f_zero.dat\0", 11) ||
++        static_cast<unsigned char>(header[0x38]) != 0 ||
++        static_cast<unsigned char>(header[0x39]) != 4 ||
++        fs::file_size(seed) != 64 + 4 * 8192) {
++      if (error) *error = "Invalid GFZE01 widescreen save template";
++      return false;
++    }
++    const auto card = user_directory / "GC" / "USA" / "Card A";
++    fs::create_directories(card);
++    const auto target = card / "8P-GFZE-f_zero.dat.gci";
++    // No overwrite option: a concurrent creation must fail safely.
++    fs::copy_file(seed, target, fs::copy_options::none);
++    ConfigResult config;
++    config.resolution = "1920x1080";
++    config.aspect_ratio = "16:9";
++    if (!SaveConfig(user_directory, config, error))
++      return false;
++    return true;
++  } catch (const fs::filesystem_error &e) {
++    if (error) *error = e.what();
++    return false;
++  }
++}
++
+ const std::vector<ResolutionOption> &SupportedResolutions() {
+-  // These are the output-resolution labels used by Dolphin's integer EFB
+-  // scales.
++  // Output dimensions and integer EFB scale are intentionally separate.
+   static const std::vector<ResolutionOption> resolutions = {
+-      {"640x528", 1},   {"1280x720", 2},  {"1920x1080", 3},  {"2560x1440", 4},
+-      {"3840x2160", 6}, {"5120x2880", 8}, {"7680x4320", 12},
++      {"640x480", 1, "480p - Original", 640, 480},
++      {"1280x800", 2, "800p - Steam Deck (1280 x 800)", 1280, 800},
++      {"1280x720", 2, "720p", 1280, 720},
++      {"1920x1080", 3, "1080p", 1920, 1080},
++      {"2560x1440", 4, "1440p", 2560, 1440},
++      {"3840x2160", 6, "4K", 3840, 2160},
+   };
+   return resolutions;
+ }
+@@ -126,6 +167,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+       if (config.graphics_backend.empty())
+         return {.error = "graphics backend must be Vulkan or OpenGL"};
+     }
++    else if (key == "vsync" || key == "boost_on_x") {
++      bool &setting = key == "vsync" ? config.vsync : config.boost_on_x;
++      if (!ParseBoolean(value, &setting))
++        return {.error = key + " must be true or false"};
++    }
++    else if (key == "anti_aliasing") {
++      if (value != "off" && value != "fxaa" && value != "msaa4")
++        return {.error = "anti_aliasing must be off, fxaa or msaa4"};
++      config.anti_aliasing = value;
++    }
++    else if (key == "anisotropy") {
++      if (value == "1") config.anisotropy = 1;
++      else if (value == "2") config.anisotropy = 2;
++      else if (value == "4") config.anisotropy = 4;
++      else if (value == "8") config.anisotropy = 8;
++      else if (value == "16") config.anisotropy = 16;
++      else return {.error = "anisotropy must be 1, 2, 4, 8 or 16"};
++    }
++    else if (key == "aspect_ratio") {
++      if (value != "preserve" && value != "16:9" && value != "4:3")
++        return {.error = "aspect_ratio must be preserve, 16:9 or 4:3"};
++      config.aspect_ratio = value == "preserve" ? "" : value;
++    }
+     else if (key == "controller")
+       config.controller = raw_value;
+     else if (key.starts_with("controller") && key.size() == 11 &&
+@@ -185,10 +249,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+   for (const ResolutionOption &option : SupportedResolutions()) {
+     if (config.resolution == option.text) {
+       config.dolphin_scale = option.dolphin_scale;
++      config.output_width = option.width;
++      config.output_height = option.height;
+       return config;
+     }
+   }
+ 
++  // Preserve old frontend choices that are no longer offered as presets.
++  if (config.resolution == "5120x2880" || config.resolution == "7680x4320") {
++    config.dolphin_scale = config.resolution == "5120x2880" ? 8 : 12;
++    return config;
++  }
++
+   // Dolphin also accepts exact raw EFB multiples even when they do not have a
+   // common display label.
+   for (int scale = 1; scale <= 12; ++scale) {
+@@ -210,7 +282,11 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+                 std::string *error) {
+   const std::string graphics_backend =
+       NormalizeGraphicsBackend(config.graphics_backend);
+-  if (config.resolution.empty() || graphics_backend.empty() ||
++  if ((config.anti_aliasing != "off" && config.anti_aliasing != "fxaa" && config.anti_aliasing != "msaa4") ||
++      (config.anisotropy != 1 && config.anisotropy != 2 && config.anisotropy != 4 && config.anisotropy != 8 && config.anisotropy != 16) ||
++      (!config.aspect_ratio.empty() && config.aspect_ratio != "16:9" &&
++       config.aspect_ratio != "4:3") ||
++      config.resolution.empty() || graphics_backend.empty() ||
+       config.netplay_nickname.empty() ||
+       config.netplay_nickname.size() > 30 ||
+       config.netplay_nickname.find_first_of("\r\n") != std::string::npos ||
+@@ -249,10 +325,15 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+     return false;
+   }
+   file << "# ModernGekko frontend settings\n"
+-          "# This is Dolphin's internal render target, not the window size.\n"
++          "# Resolution presets select output dimensions and a matching internal render scale.\n"
+           "[Video]\n"
+           "resolution="
+        << config.resolution << '\n'
++       << "aspect_ratio=" << (config.aspect_ratio.empty() ? "preserve" : config.aspect_ratio) << '\n'
++       << "vsync=" << (config.vsync ? "true" : "false") << '\n'
++       << "anti_aliasing=" << config.anti_aliasing << '\n'
++       << "anisotropy=" << config.anisotropy << '\n'
++       << "boost_on_x=" << (config.boost_on_x ? "true" : "false") << '\n'
+        << "backend=" << graphics_backend << '\n'
+        << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
+        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
+@@ -336,6 +417,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+   return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
+ }
+ 
++bool SetBoostLayout(const fs::path &user_directory, bool enabled, std::string *error) {
++  const auto path = user_directory / "Config" / "GCPadNew.ini";
++  std::ifstream input(path);
++  if (!input) {
++    if (error) *error = "Generate a GameCube controller profile first.";
++    return false;
++  }
++  std::string result, line, section;
++  int x_count = 0, y_count = 0;
++  while (std::getline(input, line)) {
++    const auto trimmed = Trim(line);
++    if (trimmed.starts_with('[')) section = trimmed;
++    const bool pad = section == "[GCPad1]" || section == "[GCPad2]" ||
++                     section == "[GCPad3]" || section == "[GCPad4]";
++    const auto equals = trimmed.find('=');
++    const auto key = equals == std::string::npos ? "" : Trim(trimmed.substr(0, equals));
++    if (pad && (key == "Buttons/X" || key == "Buttons/Y")) {
++      const auto value = Trim(trimmed.substr(equals + 1));
++      if (value != "`Button X`" && value != "`Button Y`") {
++        if (error) *error = "Custom X/Y bindings detected; edit those manually or generate a standard profile.";
++        return false;
++      }
++      const bool is_x = key == "Buttons/X";
++      if (is_x) ++x_count; else ++y_count;
++      line = key + " = `Button " + ((is_x != enabled) ? "X`" : "Y`");
++    }
++    result += line + '\n';
++  }
++  if (input.bad() || x_count == 0 || x_count != y_count) {
++    if (error) *error = "Incomplete GameCube X/Y bindings; profile was not changed.";
++    return false;
++  }
++  const auto temporary = path.string() + ".glinux-tmp";
++  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
++  output << result;
++  output.close();
++  if (!output) {
++    if (error) *error = "Could not write controller bindings.";
++    return false;
++  }
++  std::error_code ec;
++  fs::rename(temporary, path, ec);
++  if (ec) {
++    if (error) *error = "Could not replace controller bindings: " + ec.message();
++    return false;
++  }
++  return true;
++}
++
+ bool GenerateControllerConfig(const fs::path &user_directory,
+                               std::span<const std::string> controllers,
+                               std::string *message) {
+@@ -375,8 +505,10 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+     output << "Device = " << controllers[i] << '\n'
+            << "Buttons/A = `Button A`\n"
+               "Buttons/B = `Button B`\n"
+-              "Buttons/X = `Button X`\n"
+-              "Buttons/Y = `Button Y`\n"
++           << (LoadConfig(user_directory, false).boost_on_x
++                   ? "Buttons/X = `Button Y`\nButtons/Y = `Button X`\n"
++                   : "Buttons/X = `Button X`\nButtons/Y = `Button Y`\n")
++           <<
+               "Buttons/Z = `Shoulder R`\n"
+               "Buttons/Start = Start\n"
+               "Main Stick/Up = `Left Y+`\n"
+diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
+index 3b18d05..5966bb4 100644
+--- a/tools/frontend_config.hpp
++++ b/tools/frontend_config.hpp
+@@ -11,6 +11,9 @@ namespace moderngekko::frontend {
+ struct ResolutionOption {
+   const char *text;
+   int dolphin_scale;
++  const char *label;
++  int width;
++  int height;
+ };
+ 
+ struct GraphicsBackendOption {
+@@ -20,12 +23,20 @@ struct GraphicsBackendOption {
+ 
+ struct ConfigResult {
+   int dolphin_scale = 0;
++  int output_width = 0;
++  int output_height = 0;
++  bool vsync = false;
++  bool boost_on_x = false;
++  std::string anti_aliasing = "off";
++  int anisotropy = 1;
+   std::string resolution;
+   std::string graphics_backend = "Vulkan";
+   std::string controller;
+   std::vector<std::string> controllers;
+   bool show_fps_in_title = true;
+   bool fullscreen = false;
++  // Empty preserves the existing Dolphin setting.
++  std::string aspect_ratio;
+   std::string netplay_nickname = "Player";
+   std::string netplay_address = "127.0.0.1";
+   std::uint16_t netplay_port = 2626;
+@@ -35,6 +46,10 @@ struct ConfigResult {
+   explicit operator bool() const { return error.empty(); }
+ };
+ 
++// Optional GFZE01 template; only installs into a completely new profile.
++bool InitializeWidescreenProfile(const std::filesystem::path &user_directory,
++                                const std::filesystem::path &seed,
++                                std::string *error);
+ const std::vector<ResolutionOption> &SupportedResolutions();
+ const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
+ ConfigResult LoadConfig(const std::filesystem::path &user_directory,
+@@ -48,6 +63,8 @@ std::string
+ ReadConfiguredController(const std::filesystem::path &user_directory);
+ std::vector<std::string>
+ ReadConfiguredControllers(const std::filesystem::path &user_directory);
++bool SetBoostLayout(const std::filesystem::path &user_directory, bool enabled,
++                    std::string *error);
+ bool ControllerConfigExists(const std::filesystem::path &user_directory);
+ bool GenerateControllerConfig(const std::filesystem::path &user_directory,
+                               std::span<const std::string> controllers,
+diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
+index 7699c3d..61b4bec 100644
+--- a/tools/moderngekko_launcher.cpp
++++ b/tools/moderngekko_launcher.cpp
+@@ -4,6 +4,7 @@
+ #include "moderngekko/game.hpp"
+ #include "netplay_session.hpp"
+ 
++#include "Common/Image.h"
+ #include "DiscIO/DiscExtractor.h"
+ #include "DiscIO/Filesystem.h"
+ #include "DiscIO/Volume.h"
+@@ -16,6 +17,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
++#include <cctype>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <filesystem>
+@@ -337,7 +339,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+   }
+   return output;
+ #else
+-  *error = "this disc is not the pinned patched release";
++#ifdef MODERNGEKKO_REQUIRED_DISC_ID
++  *error = "This launcher requires game ID " MODERNGEKKO_REQUIRED_DISC_ID "; selected " + source_id;
++#else
++  *error = "No supported game ID was configured for this launcher";
++#endif
+   return std::nullopt;
+ #endif
+ }
+@@ -498,12 +504,128 @@ fs::path SiblingRunner(const char* argv0)
+   const fs::path sibling = self.parent_path() / runner;
+   return fs::is_regular_file(sibling) ? sibling : runner;
+ }
++struct Artwork {
++  SDL_Texture* texture = nullptr;
++  float width = 1, height = 1;
++  ImVec2 uv0{0, 0}, uv1{1, 1};
++};
++
++Artwork LoadArtwork(SDL_Renderer* renderer, const fs::path& path, bool crop = false) {
++  Artwork art;
++  std::ifstream file(path, std::ios::binary);
++  std::vector<u8> bytes((std::istreambuf_iterator<char>(file)), {});
++  Common::UniqueBuffer<u8> pixels;
++  u32 w = 0, h = 0;
++  if (bytes.empty() || !Common::LoadPNG(bytes, &pixels, &w, &h)) { std::cerr << "Artwork decode failed: " << path << "\n"; return art; }
++  if (!crop) for (size_t i = 3; i < size_t(w)*h*4; i += 4) pixels.data()[i] = 255;
++  art.texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, w, h);
++  if (!art.texture) return art;
++  SDL_UpdateTexture(art.texture, nullptr, pixels.data(), w * 4);
++  SDL_SetTextureBlendMode(art.texture, SDL_BLENDMODE_BLEND);
++  SDL_SetTextureScaleMode(art.texture, SDL_SCALEMODE_LINEAR);
++  art.width = w; art.height = h;
++  if (crop) {
++    u32 x0 = w, y0 = h, x1 = 0, y1 = 0;
++    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x)
++      if (pixels.data()[(y * w + x) * 4 + 3] > 16) {
++        x0 = std::min(x0, x); y0 = std::min(y0, y);
++        x1 = std::max(x1, x + 1); y1 = std::max(y1, y + 1);
++      }
++    if (x1 > x0 && y1 > y0) {
++      art.uv0 = ImVec2(float(x0)/w, float(y0)/h);
++      art.uv1 = ImVec2(float(x1)/w, float(y1)/h);
++      art.width = x1-x0; art.height = y1-y0;
++    }
++  }
++  return art;
++}
++
++void DrawBackdrop(const Artwork& logo) {
++  const auto* vp = ImGui::GetMainViewport();
++  const float w = vp->WorkSize.x, h = vp->WorkSize.y;
++  const ImVec2 origin = vp->WorkPos;
++  auto* draw = ImGui::GetBackgroundDrawList();
++  draw->AddRectFilled(origin, ImVec2(origin.x+w,origin.y+h), IM_COL32(3,9,20,65));
++  draw->AddRectFilled(ImVec2(origin.x,origin.y+h-115), ImVec2(origin.x+w,origin.y+h), IM_COL32(3,9,20,235));
++  const float hero = w > 900 ? w * .43f : w;
++  if (logo.texture) {
++    const float lw = hero-56, lh = lw*logo.height/logo.width;
++    draw->AddImage((ImTextureID)(intptr_t)logo.texture, ImVec2(origin.x+28,origin.y+38),
++                  ImVec2(origin.x+28+lw,origin.y+38+lh), logo.uv0,logo.uv1);
++  }
++  draw->AddLine(ImVec2(origin.x+28,origin.y+h-106), ImVec2(origin.x+hero-28,origin.y+h-106), IM_COL32(0,224,240,255),2);
++  if (w > 900) {
++    draw->AddText(ImVec2(origin.x+28,origin.y+h-85), IM_COL32(96,232,244,255), "YOUR MACHINE. YOUR RACE.");
++    draw->AddText(ImVec2(origin.x+28,origin.y+h-58), IM_COL32(210,220,234,255), "F-ZERO GLINUX  /  LINUX EDITION");
++  }
++}
++
++int ConfirmExitDialog(bool online) {
++  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) return 2;
++  auto* window = SDL_CreateWindow("F-ZERO GLINUX", 580, 260, SDL_WINDOW_ALWAYS_ON_TOP);
++  auto* renderer = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
++  if (!renderer) { SDL_Quit(); return 2; }
++  ImGui::CreateContext();
++  auto& io = ImGui::GetIO();
++  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
++  io.IniFilename = nullptr;
++  const fs::path bundled_font = fs::path(SDL_GetBasePath()) / "Assets" / "NotoSans-Regular.ttf";
++  if (fs::is_regular_file(bundled_font))
++    io.Fonts->AddFontFromFileTTF(bundled_font.string().c_str(), 17);
++  else if (fs::is_regular_file("/usr/share/fonts/noto/NotoSans-Regular.ttf"))
++    io.Fonts->AddFontFromFileTTF("/usr/share/fonts/noto/NotoSans-Regular.ttf", 17);
++  ImGui::StyleColorsDark();
++  ImGui::GetStyle().FramePadding = ImVec2(20,14);
++  ImGui::GetStyle().Colors[ImGuiCol_NavCursor] = ImVec4(0,1,1,1);
++  ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
++  ImGui_ImplSDLRenderer3_Init(renderer);
++  bool done = false, armed = false;
++  int result = 0;
++  const Uint64 started = SDL_GetTicks();
++  while (!done) {
++    SDL_Event event;
++    while (SDL_PollEvent(&event)) {
++      ImGui_ImplSDL3_ProcessEvent(&event);
++      if (event.type == SDL_EVENT_QUIT) done = true;
++    }
++    ImGui_ImplSDLRenderer3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame();
++    bool newly_armed = false;
++    if (!armed && SDL_GetTicks()-started > 300 &&
++        !ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown) && !ImGui::IsKeyDown(ImGuiKey_GamepadFaceRight) &&
++        !ImGui::IsKeyDown(ImGuiKey_Enter) && !ImGui::IsKeyDown(ImGuiKey_Escape)) {
++      armed = true; newly_armed = true;
++    }
++    ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(io.DisplaySize);
++    ImGui::Begin("Exit", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
++    ImGui::TextColored(ImVec4(0, .9f, 1, 1), "F-ZERO GLINUX");
++    ImGui::Spacing(); ImGui::TextUnformatted(online ? "Leave online session?" : "Exit the game?");
++    ImGui::TextWrapped("%s", online ? "The session keeps running. Leaving may interrupt other players." : "Progress not saved in-game will be lost. Choose No to resume.");
++    ImGui::Spacing(); ImGui::BeginDisabled(!armed);
++    if (newly_armed) ImGui::SetKeyboardFocusHere();
++    if (ImGui::Button("No - resume", ImVec2(250,54))) done = true;
++    ImGui::SameLine();
++    if (ImGui::Button("Yes - exit", ImVec2(250,54))) { result = 10; done = true; }
++    ImGui::EndDisabled();
++    if (armed && (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight))) done = true;
++    ImGui::Spacing(); ImGui::TextDisabled("D-pad: select    A: confirm    B / Escape: resume");
++    ImGui::End(); ImGui::Render();
++    SDL_SetRenderDrawColor(renderer, 5,12,23,255); SDL_RenderClear(renderer);
++    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer); SDL_RenderPresent(renderer);
++    SDL_Delay(16);
++  }
++  ImGui_ImplSDLRenderer3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
++  SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
++  return result;
++}
+ } // namespace
+ 
+ int main(int argc, char** argv)
+ {
++  if (argc > 1 && std::string_view(argv[1]) == "--confirm-exit")
++    return ConfirmExitDialog(argc > 2 && std::string_view(argv[2]) == "--online");
+   bool use_wayland = false;
+   std::optional<fs::path> extract_only;
++  std::optional<fs::path> user_override;
+   for (int i = 1; i < argc; ++i)
+   {
+     if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
+@@ -512,9 +634,23 @@ int main(int argc, char** argv)
+       use_wayland = true;
+     else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
+       extract_only = argv[++i];
++    else if (std::string_view(argv[i]) == "--user-dir")
++    {
++      if (i + 1 >= argc)
++      {
++        std::cerr << "--user-dir requires a path\n";
++        return 2;
++      }
++      user_override = fs::absolute(argv[++i]);
++    }
++    else if (std::string_view(argv[i]) == "--help")
++    {
++      std::cout << "usage: launcher [--user-dir path] [--wayland | --x11] [--extract image]\n";
++      return 0;
++    }
+   }
+ 
+-  const fs::path user_directory = DefaultUserDirectory();
++  const fs::path user_directory = user_override.value_or(DefaultUserDirectory());
+   const fs::path release_directory = ExecutableDirectory(argv[0]);
+   if (extract_only)
+   {
+@@ -530,6 +666,12 @@ int main(int argc, char** argv)
+     return success ? 0 : 1;
+   }
+ 
++  std::string seed_error;
++  if (!moderngekko::frontend::InitializeWidescreenProfile(
++          user_directory, release_directory / "Seeds" / "GFZE01-widescreen.gci", &seed_error)) {
++    std::cerr << "First-launch setup failed: " << seed_error << '\n';
++    return 1;
++  }
+   auto config = moderngekko::frontend::LoadConfig(user_directory, true);
+   if (!config)
+   {
+@@ -547,7 +689,7 @@ int main(int argc, char** argv)
+     return 1;
+ 
+   const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+-  SDL_Window* window = SDL_CreateWindow(MODERNGEKKO_FRONTEND_NAME, static_cast<int>(820 * scale),
++  SDL_Window* window = SDL_CreateWindow(MODERNGEKKO_FRONTEND_NAME, static_cast<int>(1100 * scale),
+                                         static_cast<int>(700 * scale),
+                                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+   if (!window)
+@@ -556,6 +698,11 @@ int main(int argc, char** argv)
+     SDL_Quit();
+     return 1;
+   }
++  SDL_SetWindowMinimumSize(window, 640, 480);
++  SDL_Rect usable;
++  if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable))
++    SDL_SetWindowSize(window, std::min(static_cast<int>(1100*scale), usable.w),
++                      std::min(static_cast<int>(700*scale), usable.h));
+   SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
+   if (!renderer)
+     renderer = SDL_CreateRenderer(window, nullptr);
+@@ -571,14 +718,33 @@ int main(int argc, char** argv)
+   IMGUI_CHECKVERSION();
+   ImGui::CreateContext();
+   ImGuiIO& io = ImGui::GetIO();
+-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
++  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+   io.IniFilename = nullptr;
++  const fs::path bundled_font = fs::path(SDL_GetBasePath()) / "Assets" / "NotoSans-Regular.ttf";
++  if (fs::is_regular_file(bundled_font))
++    io.Fonts->AddFontFromFileTTF(bundled_font.string().c_str(), 17);
++  else if (fs::is_regular_file("/usr/share/fonts/noto/NotoSans-Regular.ttf"))
++    io.Fonts->AddFontFromFileTTF("/usr/share/fonts/noto/NotoSans-Regular.ttf", 17);
+   ImGui::StyleColorsDark();
++  auto &style = ImGui::GetStyle();
++  style.FramePadding = ImVec2(10, 8);
++  style.ItemSpacing = ImVec2(10, 10);
++  style.FrameRounding = 8;
++  style.WindowPadding = ImVec2(24,24);
++  style.Colors[ImGuiCol_WindowBg] = ImVec4(.025f,.045f,.08f,.96f);
++  style.Colors[ImGuiCol_Button] = ImVec4(.04f,.26f,.34f,1);
++  style.Colors[ImGuiCol_FrameBg] = ImVec4(.07f,.12f,.18f,1);
++  style.Colors[ImGuiCol_Header] = ImVec4(.03f,.35f,.43f,1);
++  style.Colors[ImGuiCol_NavCursor] = ImVec4(0.1f, 0.95f, 1.0f, 1.0f);
++  style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.05f, 0.45f, 0.6f, 1.0f);
+   ImGui::GetStyle().ScaleAllSizes(scale);
+   ImGui::GetStyle().FontScaleDpi = scale;
+   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+   ImGui_ImplSDLRenderer3_Init(renderer);
+ 
++  const Artwork background = LoadArtwork(renderer, release_directory / "Assets" / "flash1.png");
++  const Artwork logo = LoadArtwork(renderer, release_directory / "Assets" / "FZ_TRANSPARENTLOGO.png", true);
++  int preview_frames = 0;
+   std::vector<fs::path> images = FindDiscImages();
+   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
+   fs::path current_game = ReadDefaultGame(user_directory, release_directory);
+@@ -631,6 +797,10 @@ int main(int argc, char** argv)
+   // newest file automatically could try to resume a different title.
+   int selected_savestate = -1;
+ 
++  fs::path browser_directory = DocumentsDirectory();
++  std::vector<std::pair<fs::path, bool>> browser_entries;
++  std::string browser_error;
++  bool browser_refresh = true;
+   DialogState dialog;
+   std::vector<ControllerOption> controllers = EnumerateControllers();
+   bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
+@@ -774,14 +944,18 @@ int main(int argc, char** argv)
+     ImGui_ImplSDL3_NewFrame();
+     ImGui::NewFrame();
+     const ImGuiViewport* viewport = ImGui::GetMainViewport();
+-    ImGui::SetNextWindowPos(viewport->WorkPos);
+-    ImGui::SetNextWindowSize(viewport->WorkSize);
++    DrawBackdrop(logo);
++    const float panel_x = viewport->WorkSize.x > 900 ? viewport->WorkSize.x * .43f : 0;
++    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x+panel_x, viewport->WorkPos.y));
++    ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x-panel_x, viewport->WorkSize.y));
+     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
+                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                      ImGuiWindowFlags_NoSavedSettings);
+-    ImGui::TextUnformatted(MODERNGEKKO_FRONTEND_NAME);
++    ImGui::TextColored(ImVec4(0.1f,.9f,1,1), "RACE CONTROL");
++    ImGui::TextDisabled("D-pad: navigate  /  A: confirm  /  B: back");
+     ImGui::Separator();
+ 
++
+     if (current_metadata)
+     {
+       ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
+@@ -820,7 +994,8 @@ int main(int argc, char** argv)
+         ImGui::TextDisabled("Solo play only.");
+         ImGui::Spacing();
+       }
+-      if (ImGui::Button("Play", ImVec2(180 * scale, 42 * scale)))
++      if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
++      if (ImGui::Button("PLAY  /  START RACING", ImVec2(-1, 58 * scale)))
+       {
+         if (ensure_controller())
+         {
+@@ -828,8 +1003,7 @@ int main(int argc, char** argv)
+           done = true;
+         }
+       }
+-      ImGui::SameLine();
+-      if (ImGui::Button("Host Netplay", ImVec2(180 * scale, 42 * scale)))
++      if (ImGui::Button("Host Netplay", ImVec2((ImGui::GetContentRegionAvail().x-style.ItemSpacing.x)/2, 38 * scale)))
+       {
+         if (ensure_controller())
+         {
+@@ -857,7 +1031,7 @@ int main(int argc, char** argv)
+         }
+       }
+       ImGui::SameLine();
+-      if (ImGui::Button("Join Netplay", ImVec2(180 * scale, 42 * scale)))
++      if (ImGui::Button("Join Netplay", ImVec2(-1, 38 * scale)))
+       {
+         if (ensure_controller())
+         {
+@@ -891,6 +1065,7 @@ int main(int argc, char** argv)
+     }
+ 
+     ImGui::Spacing();
++    if (ImGui::CollapsingHeader("DISPLAY & GRAPHICS")) {
+     ImGui::TextUnformatted("Graphics backend");
+     if (ImGui::BeginCombo("##graphics_backend",
+                           graphics_backends[graphics_backend_index].text))
+@@ -940,13 +1115,31 @@ int main(int argc, char** argv)
+       }
+     }
+     ImGui::Spacing();
+-    ImGui::TextUnformatted("Internal resolution (Dolphin EFB upscale)");
+-    if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
++    ImGui::TextUnformatted("Display aspect ratio");
++    const char* aspect_labels[] = {"Keep existing setting", "16:9 (native widescreen)", "4:3 (original)"};
++    const char* aspect_values[] = {"", "16:9", "4:3"};
++    int aspect_index = config.aspect_ratio == "16:9" ? 1 : config.aspect_ratio == "4:3" ? 2 : 0;
++    if (ImGui::Combo("##aspect_ratio", &aspect_index, aspect_labels, 3)) {
++      const auto previous_aspect = config.aspect_ratio;
++      config.aspect_ratio = aspect_values[aspect_index];
++      std::string error;
++      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error)) {
++        config.aspect_ratio = previous_aspect;
++        std::lock_guard lock(dialog.mutex);
++        dialog.error = std::move(error);
++      }
++    }
++    ImGui::TextWrapped("Match this to GX's Screen Mode in Options. Enable widescreen there for 16:9; the game remembers it in your save.");
++    ImGui::Spacing();
++    ImGui::TextUnformatted("Resolution preset");
++    const std::string resolution_preview = config.resolution == resolutions[resolution_index].text
++        ? resolutions[resolution_index].label : config.resolution + " (legacy internal resolution)";
++    if (ImGui::BeginCombo("##resolution", resolution_preview.c_str()))
+     {
+       for (std::size_t i = 0; i < resolutions.size(); ++i)
+       {
+         const bool selected = resolution_index == static_cast<int>(i);
+-        if (ImGui::Selectable(resolutions[i].text, selected))
++        if (ImGui::Selectable(resolutions[i].label, selected))
+         {
+           std::string error;
+           if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
+@@ -981,6 +1174,35 @@ int main(int argc, char** argv)
+       }
+     }
+     ImGui::Spacing();
++    ImGui::TextWrapped("Window size follows the preset; fullscreen uses your desktop display mode. Internal rendering uses the matching Dolphin scale. Aspect ratio is kept separate.");
++    const auto previous_graphics = config;
++    bool graphics_changed = ImGui::Checkbox("VSync", &config.vsync);
++    const char* aa_labels[] = {"Off", "FXAA (lighter, softer)", "4x MSAA (higher GPU load)"};
++    const char* aa_values[] = {"off", "fxaa", "msaa4"};
++    int aa_index = config.anti_aliasing == "fxaa" ? 1 : config.anti_aliasing == "msaa4" ? 2 : 0;
++    if (ImGui::Combo("Anti-aliasing", &aa_index, aa_labels, 3)) {
++      config.anti_aliasing = aa_values[aa_index];
++      graphics_changed = true;
++    }
++    ImGui::TextDisabled("Unsupported MSAA falls back to Off in the renderer.");
++    const char* af_labels[] = {"1x (off)", "2x", "4x", "8x", "16x"};
++    int af_index = 0;
++    for (int value = config.anisotropy; value > 1; value >>= 1) ++af_index;
++    if (ImGui::Combo("Texture filtering", &af_index, af_labels, 5)) {
++      config.anisotropy = 1 << af_index;
++      graphics_changed = true;
++    }
++    if (graphics_changed) {
++      std::string error;
++      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error)) {
++        config = previous_graphics;
++        std::lock_guard lock(dialog.mutex);
++        dialog.error = std::move(error);
++      }
++    }
++    ImGui::Spacing();
++    }
++    if (ImGui::CollapsingHeader("CONTROLLER")) {
+     ImGui::TextUnformatted("Controller profile");
+     const char* controller_preview = controller_index >= 0
+                                          ? controllers[controller_index].label.c_str()
+@@ -1012,6 +1234,28 @@ int main(int argc, char** argv)
+       select_controller(controller_index);
+     ImGui::EndDisabled();
+     ImGui::Spacing();
++    bool boost_on_x = config.boost_on_x;
++    if (ImGui::Checkbox("Boost on X (swap X / Y)", &boost_on_x)) {
++      std::string error;
++      if (moderngekko::frontend::SetBoostLayout(user_directory, boost_on_x, &error)) {
++        const bool old_layout = config.boost_on_x;
++        config.boost_on_x = boost_on_x;
++        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error)) {
++          config.boost_on_x = old_layout;
++          std::string rollback_error;
++          if (!moderngekko::frontend::SetBoostLayout(user_directory, old_layout, &rollback_error))
++            error += " / " + rollback_error;
++        }
++      }
++      if (!error.empty()) {
++        std::lock_guard lock(dialog.mutex);
++        dialog.error = std::move(error);
++      }
++    }
++    ImGui::TextWrapped("Xbox-style layout: A accelerates, X boosts, Y takes the original X action. Sticks and triggers are preserved.");
++    ImGui::Spacing();
++    }
++    if (ImGui::CollapsingHeader("ONLINE SETTINGS")) {
+     ImGui::TextUnformatted("Netplay");
+     ImGui::SetNextItemWidth(220 * scale);
+     ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
+@@ -1027,24 +1271,72 @@ int main(int argc, char** argv)
+       ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+     }
+     ImGui::Spacing();
++    }
+     ImGui::TextUnformatted("Game disc image");
+     if (selected_image)
+       ImGui::TextWrapped("%s", selected_image->string().c_str());
+     else
+-      ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
++      ImGui::TextDisabled("No ISO or RVZ selected");
+ 
+     if (!extraction.running)
+     {
+-      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
+-      {
+-        static constexpr SDL_DialogFileFilter filters[] = {
+-            {"Disc images", "iso;wbfs;rvz"},
+-            {"ISO", "iso"},
+-            {"WBFS", "wbfs"},
+-            {"RVZ", "rvz"}};
+-        const std::string documents = DocumentsDirectory().string();
+-        SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
+-                               static_cast<int>(std::size(filters)), documents.c_str(), false);
++      if (ImGui::Button("Browse for ISO / RVZ")) {
++        browser_refresh = true;
++        ImGui::OpenPopup("Choose game image");
++      }
++      ImGui::SetNextWindowSize(ImVec2(680 * scale, 520 * scale), ImGuiCond_Appearing);
++      if (ImGui::BeginPopupModal("Choose game image", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
++        if (browser_refresh) {
++          browser_entries.clear();
++          browser_error.clear();
++          std::error_code ec;
++          fs::directory_iterator entries(browser_directory, fs::directory_options::skip_permission_denied, ec);
++          while (!ec && entries != fs::directory_iterator{}) {
++            const auto entry = *entries;
++            std::error_code type_error;
++            const bool directory = entry.is_directory(type_error);
++            std::string extension = entry.path().extension().string();
++            std::transform(extension.begin(), extension.end(), extension.begin(),
++                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++            if (!type_error && (directory || extension == ".iso" || extension == ".rvz"))
++              browser_entries.emplace_back(entry.path(), directory);
++            entries.increment(ec);
++          }
++          if (ec) browser_error = ec.message();
++          std::sort(browser_entries.begin(), browser_entries.end(), [](const auto &a, const auto &b) {
++            if (a.second != b.second) return a.second > b.second;
++            return a.first.filename() < b.first.filename();
++          });
++          browser_refresh = false;
++        }
++        ImGui::TextWrapped("%s", browser_directory.string().c_str());
++        if (ImGui::Button("Parent folder")) {
++          browser_directory = browser_directory.parent_path();
++          browser_refresh = true;
++        }
++        ImGui::SameLine();
++        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
++            ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
++        if (!browser_error.empty()) ImGui::TextWrapped("%s", browser_error.c_str());
++        if (ImGui::BeginChild("Image files", ImVec2(0, 0))) {
++          for (std::size_t i = 0; i < browser_entries.size(); ++i) {
++            const auto &[path, directory] = browser_entries[i];
++            const std::string label = (directory ? "[Folder] " : "") + path.filename().string();
++            ImGui::PushID(static_cast<int>(i));
++            if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups)) {
++              if (directory) {
++                browser_directory = path;
++                browser_refresh = true;
++              } else {
++                selected_image = path;
++                ImGui::CloseCurrentPopup();
++              }
++            }
++            ImGui::PopID();
++          }
++        }
++        ImGui::EndChild();
++        ImGui::EndPopup();
+       }
+       if (selected_image)
+       {
+@@ -1090,16 +1382,71 @@ int main(int argc, char** argv)
+     ImGui::Spacing();
+     ImGui::Separator();
+     ImGui::TextWrapped("Controller: %s", controller_status.c_str());
++    if (ImGui::Button("Exit launcher")) done = true;
+     ImGui::End();
+ 
+     ImGui::Render();
+     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
+     SDL_SetRenderDrawColor(renderer, 18, 20, 28, 255);
+     SDL_RenderClear(renderer);
++    if (background.texture) {
++      const float w = io.DisplaySize.x, h = io.DisplaySize.y;
++      const float image_height = background.height * .74f; // Frame artwork above its baked-in title-screen prompt.
++      const float factor = std::max(w/background.width, h/image_height);
++      SDL_FRect src{(background.width-w/factor)/2, (image_height-h/factor)/2, w/factor, h/factor};
++      SDL_FRect dst{0,0,w,h};
++      SDL_RenderTexture(renderer, background.texture, &src, &dst);
++    }
+     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
++    if (const char* preview = std::getenv("GLINUX_PREVIEW_OUTPUT"); preview && ++preview_frames == 3) {
++      SDL_Surface* surface = SDL_RenderReadPixels(renderer, nullptr);
++      SDL_Surface* rgba = surface ? SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32) : nullptr;
++      if (rgba) Common::SavePNG(preview, static_cast<const u8*>(rgba->pixels), Common::ImageByteFormat::RGBA,
++                                rgba->w, rgba->h, rgba->pitch);
++      SDL_DestroySurface(rgba); SDL_DestroySurface(surface); done = true;
++    }
+     SDL_RenderPresent(renderer);
+   }
+ 
++  // Present feedback before disc preparation/process creation, and keep pumping
++  // events while the runner initializes. Never leave a stale clickable Play frame.
++  const auto draw_loading = [&]() {
++    ImGui_ImplSDLRenderer3_NewFrame();
++    ImGui_ImplSDL3_NewFrame();
++    ImGui::NewFrame();
++    const auto *viewport = ImGui::GetMainViewport();
++    DrawBackdrop(logo);
++    const float panel_x = viewport->WorkSize.x > 900 ? viewport->WorkSize.x * .43f : 0;
++    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x+panel_x, viewport->WorkPos.y));
++    ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x-panel_x, viewport->WorkSize.y));
++    ImGui::Begin("Starting F-ZERO GLINUX", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
++    ImGui::TextUnformatted(MODERNGEKKO_FRONTEND_NAME);
++    ImGui::Separator();
++    ImGui::Spacing();
++    ImGui::BeginDisabled();
++    ImGui::Button("LOADING...", ImVec2(180 * scale, 42 * scale));
++    ImGui::EndDisabled();
++    ImGui::TextWrapped("Starting the game. This can take a few seconds.");
++    ImGui::End();
++    ImGui::Render();
++    SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
++    SDL_SetRenderDrawColor(renderer, 18, 20, 28, 255);
++    SDL_RenderClear(renderer);
++    if (background.texture) {
++      const float w = io.DisplaySize.x, h = io.DisplaySize.y;
++      const float image_height = background.height * .74f; // Frame artwork above its baked-in title-screen prompt.
++      const float factor = std::max(w/background.width, h/image_height);
++      SDL_FRect src{(background.width-w/factor)/2, (image_height-h/factor)/2, w/factor, h/factor};
++      SDL_FRect dst{0,0,w,h};
++      SDL_RenderTexture(renderer, background.texture, &src, &dst);
++    }
++    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
++    SDL_RenderPresent(renderer);
++  };
++  if (launch_mode != LaunchMode::None)
++    draw_loading();
++
+   if (extraction_thread.joinable())
+     extraction_thread.join();
+ 
+@@ -1118,6 +1465,10 @@ int main(int argc, char** argv)
+       std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
+                                                    current_game.string(), "--user-dir",
+                                                    user_directory.string()};
++      const fs::path ready_file = user_directory /
++          (".startup-ready-" + std::to_string(SDL_GetTicksNS()));
++      argument_storage.emplace_back("--startup-ready-file");
++      argument_storage.emplace_back(ready_file.string());
+       // Solo only: see the note by the dropdown.
+       if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
+           static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
+@@ -1201,9 +1552,29 @@ int main(int argc, char** argv)
+       }
+       else
+       {
+-        SDL_HideWindow(window);
+         int exit_code = 1;
+-        const bool waited = SDL_WaitProcess(process, true, &exit_code);
++        bool loading_visible = true;
++        bool exited = false;
++        while (!(exited = SDL_WaitProcess(process, false, &exit_code))) {
++          std::error_code ready_error;
++          if (fs::exists(ready_file, ready_error)) break;
++          SDL_Event loading_event;
++          while (SDL_PollEvent(&loading_event)) {
++            ImGui_ImplSDL3_ProcessEvent(&loading_event);
++            // Dismissing this status window does not cancel the game launch.
++            if (loading_event.type == SDL_EVENT_QUIT ||
++                loading_event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
++              SDL_HideWindow(window);
++              loading_visible = false;
++            }
++          }
++          if (loading_visible) draw_loading();
++          SDL_Delay(16);
++        }
++        SDL_HideWindow(window);
++        const bool waited = exited || SDL_WaitProcess(process, true, &exit_code);
++        std::error_code ready_cleanup_error;
++        fs::remove(ready_file, ready_cleanup_error);
+         SDL_DestroyProcess(process);
+         if (!waited || exit_code != 0)
+         {
+@@ -1266,6 +1637,8 @@ int main(int argc, char** argv)
+   ImGui_ImplSDLRenderer3_Shutdown();
+   ImGui_ImplSDL3_Shutdown();
+   ImGui::DestroyContext();
++  SDL_DestroyTexture(background.texture);
++  SDL_DestroyTexture(logo.texture);
+   SDL_DestroyRenderer(renderer);
+   SDL_DestroyWindow(window);
+   SDL_Quit();
+diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
+index d6b3569..3def4cb 100644
+--- a/tools/moderngekko_run.cpp
++++ b/tools/moderngekko_run.cpp
+@@ -6,6 +6,7 @@
+ #include "netplay_session.hpp"
+ 
+ #include "Common/StringUtil.h"
++#include <SDL3/SDL.h>
+ 
+ #include <charconv>
+ #include <chrono>
+@@ -191,6 +192,8 @@ int RunMain(int argc, char **argv) {
+       config.window_system = moderngekko::WindowSystem::Wayland;
+     else if (arg == "--mute")
+       config.audio.mute = true;
++    else if (arg == "--startup-ready-file")
++      config.startup_ready_file = value("--startup-ready-file");
+     else if (arg == "--automation-dir")
+       config.automation.directory = value("--automation-dir");
+     else if (arg == "--headless")
+@@ -246,6 +249,12 @@ int RunMain(int argc, char **argv) {
+     return 2;
+   }
+   config.graphics.internal_resolution_scale = frontend_config.dolphin_scale;
++  config.graphics.aspect_ratio = frontend_config.aspect_ratio;
++  config.graphics.output_width = frontend_config.output_width;
++  config.graphics.output_height = frontend_config.output_height;
++  config.graphics.vsync = frontend_config.vsync;
++  config.graphics.anti_aliasing = frontend_config.anti_aliasing;
++  config.graphics.anisotropy = frontend_config.anisotropy;
+   if (config.graphics.backend.empty())
+     config.graphics.backend = frontend_config.graphics_backend;
+   config.fullscreen = frontend_config.fullscreen;
+@@ -338,6 +347,20 @@ int RunMain(int argc, char **argv) {
+     config.graphics.backend = "Vulkan";
+ #endif
+ 
++  if (!config.headless) {
++    config.confirm_exit = [executable_directory](bool online) {
++      // A separate process keeps Dolphin's SDL input event thread from consuming
++      // the dialog's events, and leaves the game's renderer untouched.
++      const std::string launcher = (executable_directory / "ModernGekko").string();
++      const char* args[] = {launcher.c_str(), "--confirm-exit", online ? "--online" : "--offline", nullptr};
++      SDL_Process* process = SDL_CreateProcess(args, false);
++      if (!process) return false;
++      int status = 0;
++      const bool waited = SDL_WaitProcess(process, true, &status);
++      SDL_DestroyProcess(process);
++      return waited && status == 10;
++    };
++  }
+   if (netplay_role) {
+     moderngekko::frontend::NetplayOptions options;
+     options.role = *netplay_role;

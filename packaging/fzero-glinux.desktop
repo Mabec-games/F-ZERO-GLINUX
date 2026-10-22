@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=F-ZERO GLINUX
+Comment=F-ZERO GX Linux launcher (Dolphin JIT preview)
+Exec=ModernGekko
+Icon=fzero-glinux
+Terminal=false
+Categories=Game;

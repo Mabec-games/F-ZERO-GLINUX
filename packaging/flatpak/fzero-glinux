@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+export MODERNGEKKO_STATICRECOMP=0
+unset STATICRECOMP_MODULE
+user_dir="${GLINUX_USER_DIR:-$XDG_DATA_HOME/fzero-glinux}"
+mkdir -p "$user_dir"
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    set -- --wayland "$@"
+fi
+exec /app/bin/ModernGekko --user-dir "$user_dir" "$@"

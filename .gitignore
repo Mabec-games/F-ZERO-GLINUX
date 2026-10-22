@@ -8,7 +8,13 @@ build-*/
 cmake-build-*/
 CMakeUserPresets.json
 .cache/
+*.gci
+*.gci.deleted
+*.raw
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Packaged release artifacts
+dist/

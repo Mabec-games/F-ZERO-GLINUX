@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+appdir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+required="$(cat "$appdir/usr/share/fzero-glinux/minimum-glibc")"
+installed="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
+installed="${installed#glibc }"
+if [[ -z "$installed" || "$(printf '%s\n%s\n' "$required" "$installed" | sort -V | head -n1)" != "$required" ]]; then
+    echo "F-ZERO GLINUX: this preview requires glibc $required or newer (found: ${installed:-unknown})." >&2
+    echo "An older-baseline rebuild is required for this distribution." >&2
+    exit 1
+fi
+if [[ "${1:-}" == --compatibility ]]; then
+    cat "$appdir/usr/share/fzero-glinux/COMPATIBILITY.txt"
+    echo "Host glibc: $installed"
+    exit 0
+fi
+# User files must survive AppImage updates and its read-only temporary mount.
+user_dir="${GLINUX_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fzero-glinux}"
+mkdir -p "$user_dir"
+export MODERNGEKKO_STATICRECOMP=0
+unset STATICRECOMP_MODULE
+export LD_LIBRARY_PATH="$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Honour explicit --wayland/--x11; select Wayland only without X/XWayland.
+backend=()
+if [[ -z "${DISPLAY:-}" && -n "${WAYLAND_DISPLAY:-}" ]]; then backend=(--wayland); fi
+exec "$appdir/usr/bin/ModernGekko" --user-dir "$user_dir" "${backend[@]}" "$@"

@@ -1,0 +1,227 @@
+diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
+index e3581cc..4ec6b7d 100644
+--- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
++++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
+@@ -148,6 +148,9 @@ void StaticRecompCore::Init()
+   g_static_recomp_core = this;
+   RefreshConfig();
+   m_collect_dispatch_samples = std::getenv("STATICRECOMP_DISPATCH_SAMPLES") != nullptr;
++  const char* fast_ibat = std::getenv("GLINUX_FAST_IBAT_READ");
++  m_fast_ibat_read_enabled = !fast_ibat || std::strcmp(fast_ibat, "0") != 0;
++  m_verify_fast_ibat_read = std::getenv("GLINUX_VERIFY_IBAT_READ") != nullptr;
+   const char* fallback_override = std::getenv("STATICRECOMP_FALLBACK_RANGES");
+   std::istringstream fallback_ranges(fallback_override ? fallback_override :
+                                                          Config::Get(Config::MAIN_STATICRECOMP_FALLBACK_RANGES));
+@@ -211,6 +214,11 @@ void StaticRecompCore::Shutdown()
+                (unsigned long long)m_bursts, (unsigned long long)m_charged_cycles);
+   std::vector<std::pair<u32, u64>> dispatch_samples(m_dispatch_samples.begin(),
+                                                     m_dispatch_samples.end());
++  std::fprintf(stderr, "[staticrecomp] fast-ibat-reads=%llu\n",
++               static_cast<unsigned long long>(m_fast_ibat_reads));
++  if (m_verify_fast_ibat_read)
++    std::fprintf(stderr, "[staticrecomp] interpreter-verified-ibat-reads=%llu\n",
++                 static_cast<unsigned long long>(m_verified_ibat_reads));
+   std::sort(dispatch_samples.begin(), dispatch_samples.end(),
+             [](const auto& left, const auto& right) { return left.second > right.second; });
+   for (std::size_t i = 0; i < std::min<std::size_t>(dispatch_samples.size(), 16); ++i)
+@@ -226,6 +234,17 @@ void StaticRecompCore::Shutdown()
+                  m_native_dispatches, m_fallback_steps, m_native_exceptions,
+                  m_hook_fallback_instructions, m_failed_chunks, m_verifications,
+                  m_reverify_events);
++  std::vector<std::pair<u64, u64>> hook_samples(m_hook_fallback_samples.begin(),
++                                               m_hook_fallback_samples.end());
++  std::sort(hook_samples.begin(), hook_samples.end(),
++            [](const auto& left, const auto& right) { return left.second > right.second; });
++  for (std::size_t i = 0; i < std::min<std::size_t>(hook_samples.size(), 16); ++i)
++  {
++    std::fprintf(stderr, "[staticrecomp] fallback-site pc=%08x opcode=%08x samples=%llu\n",
++                 static_cast<u32>(hook_samples[i].first >> 32),
++                 static_cast<u32>(hook_samples[i].first),
++                 static_cast<unsigned long long>(hook_samples[i].second));
++  }
+   m_lockstep_verifier.reset();
+   m_block_cache.Shutdown();
+   m_module = nullptr;
+diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h
+index d084fea..273027b 100644
+--- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h
++++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h
+@@ -173,8 +173,14 @@ private:
+   u64 m_fallback_steps = 0;
+   u64 m_native_exceptions = 0;
+   u64 m_hook_fallback_instructions = 0;
++  u64 m_fast_ibat_reads = 0;
++  bool m_fast_ibat_read_enabled = true;
++  bool m_verify_fast_ibat_read = false;
++  u64 m_verified_ibat_reads = 0;
+   u64 m_timebase_cycle_remainder = 0;
+   std::unordered_map<u32, u64> m_dispatch_samples;
++  // Opt-in event sampling: address and opcode, once per 4096 fallback hooks.
++  std::unordered_map<u64, u64> m_hook_fallback_samples;
+   u64 m_bursts = 0;          // SyncIn..SyncOut native runs (diagnostic)
+   u64 m_charged_cycles = 0;  // cycles flushed from module charges (diagnostic)
+ 
+diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Hooks.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Hooks.cpp
+index 7b3d845..8af7244 100644
+--- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Hooks.cpp
++++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Hooks.cpp
+@@ -13,6 +13,8 @@
+ #include "Common/Logging/Log.h"
+ 
+ #include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ 
+ namespace
+ {
+@@ -367,6 +369,9 @@ void StaticRecompCore::HookInstructionFallback(CPUState* cpu, u32 raw, u32 cia)
+   auto* core = static_cast<StaticRecompCore*>(cpu->external_user_data);
+   cia = core->TranslateRelAddress(cia);
+   ++core->m_hook_fallback_instructions;
++  if (core->m_collect_dispatch_samples &&
++      (core->m_hook_fallback_instructions & 4095u) == 0)
++    ++core->m_hook_fallback_samples[(static_cast<u64>(cia) << 32) | raw];
+ 
+   // Lockstep: a block that fell back to the interpreter for an unmodeled
+   // instruction (DMA mtspr, cache op, ...) performed side effects not captured
+@@ -378,6 +383,55 @@ void StaticRecompCore::HookInstructionFallback(CPUState* cpu, u32 raw, u32 cia)
+   auto& system = core->m_system;
+   auto& ppc = system.GetPPCState();
+ 
++  // F-Zero GX repeatedly reads IBAT0U in its cache/FP setup routines.
++  // Interpreter::mfspr reads this register without side effects in supervisor
++  // mode. BAT state is owned by Dolphin (not copied in SyncIn/SyncOut).
++  // Match only this instruction, with any destination GPR. Privileged traps
++  // and lockstep verification retain the existing interpreter path.
++  if (core->m_fast_ibat_read_enabled && !core->m_lockstep_verifier->IsEnabled() &&
++      (raw & 0xFC1FFFFFu) == 0x7C1082A6u && (cpu->msr & 0x4000u) == 0)
++  {
++    const u32 destination = (raw >> 21) & 31u;
++    const u32 value = ppc.spr[SPR_IBAT0U];
++    ++core->m_fast_ibat_reads;
++    // Diagnostic mode checks sampled reads against the original, full
++    // interpreter route. Keep its result on those samples.
++    if (core->m_verify_fast_ibat_read && (core->m_fast_ibat_reads & 65535u) == 0)
++    {
++      const CPUState before = *cpu;
++      const s64 expected_downcount =
++          static_cast<s64>(ppc.downcount) + before.downcount - 1;
++      core->SyncOut();
++      ppc.pc = cia;
++      ppc.npc = cia + 4u;
++      ppc.downcount -= system.GetInterpreter().SingleStepInner();
++      core->SyncIn();
++      bool matches = cpu->pc == cia + 4u && cpu->gpr[destination] == value &&
++                     cpu->msr == before.msr && cpu->cr == before.cr &&
++                     cpu->xer == before.xer && cpu->fpscr == before.fpscr &&
++                     cpu->lr == before.lr && cpu->ctr == before.ctr &&
++                     static_cast<s64>(ppc.downcount) + cpu->downcount == expected_downcount &&
++                     std::memcmp(cpu->fpr, before.fpr, sizeof(cpu->fpr)) == 0 &&
++                     std::memcmp(cpu->ps1, before.ps1, sizeof(cpu->ps1)) == 0;
++      for (u32 i = 0; i < 32; ++i)
++        if (i != destination)
++          matches = matches && cpu->gpr[i] == before.gpr[i];
++      if (!matches)
++      {
++        std::fprintf(stderr, "[staticrecomp] IBAT read verification FAILED at %08x\n", cia);
++        std::abort();
++      }
++      ++core->m_verified_ibat_reads;
++      return;
++    }
++    cpu->gpr[destination] = value;
++    cpu->pc = cia + 4u;
++    // Preserve the hook's existing cycle-charge convention (mfspr: 1 cycle).
++    --ppc.downcount;
++    PowerPC::UpdatePerformanceMonitor(1, 0, 0, ppc);
++    return;
++  }
++
+   // Fast path for dcbf/dcbst/dcbi/icbi: streaming code flushes caches in
+   // 32-byte loops (thousands per frame), and these ops read two GPRs and
+   // change no CPU state, so they run straight off ctx without the full
+diff --git a/Source/Core/DolphinNoGUI/Platform.cpp b/Source/Core/DolphinNoGUI/Platform.cpp
+index d838a9a..79e3237 100644
+--- a/Source/Core/DolphinNoGUI/Platform.cpp
++++ b/Source/Core/DolphinNoGUI/Platform.cpp
+@@ -57,6 +57,17 @@ void Platform::Stop()
+   m_running.Clear();
+ }
+ 
++void Platform::ConfirmExit()
++{
++  // Ignore auto-repeat events queued while the modal dialog was open.
++  if (std::chrono::steady_clock::now() - m_last_exit_prompt < std::chrono::milliseconds(300))
++    return;
++  const bool confirmed = !m_confirm_exit || m_confirm_exit();
++  m_last_exit_prompt = std::chrono::steady_clock::now();
++  if (confirmed)
++    RequestShutdown();
++}
++
+ void Platform::RequestShutdown()
+ {
+   m_shutdown_requested.Set();
+diff --git a/Source/Core/DolphinNoGUI/Platform.h b/Source/Core/DolphinNoGUI/Platform.h
+index 5b0729a..2d145fc 100644
+--- a/Source/Core/DolphinNoGUI/Platform.h
++++ b/Source/Core/DolphinNoGUI/Platform.h
+@@ -4,6 +4,8 @@
+ #pragma once
+ 
+ #include <memory>
++#include <functional>
++#include <chrono>
+ #include <string>
+ 
+ #include "Common/Flag.h"
+@@ -27,6 +29,8 @@ public:
+ 
+   // Requests a graceful shutdown, from SIGINT/SIGTERM.
+   void RequestShutdown();
++  void SetExitConfirmation(std::function<bool()> callback) { m_confirm_exit = std::move(callback); }
++  void ConfirmExit();
+ 
+   // Requests a slot-1 savestate save/load, from SIGUSR1/SIGUSR2 (nogui has no
+   // hotkey scheduler, so signals are the external savestate trigger).
+@@ -59,6 +63,8 @@ public:
+ protected:
+   void UpdateRunningFlag();
+ 
++  std::function<bool()> m_confirm_exit;
++  std::chrono::steady_clock::time_point m_last_exit_prompt{};
+   Common::Flag m_running{true};
+   Common::Flag m_shutdown_requested{false};
+   Common::Flag m_tried_graceful_shutdown{false};
+diff --git a/Source/Core/DolphinNoGUI/PlatformWayland.cpp b/Source/Core/DolphinNoGUI/PlatformWayland.cpp
+index f7e1ca2..ef144b5 100644
+--- a/Source/Core/DolphinNoGUI/PlatformWayland.cpp
++++ b/Source/Core/DolphinNoGUI/PlatformWayland.cpp
+@@ -617,9 +617,9 @@ bool PlatformWayland::ModifierActive(const char* name) const
+ void PlatformWayland::HandleHotkey(xkb_keysym_t symbol)
+ {
+   auto& system = Core::System::GetInstance();
+-  if (symbol == XKB_KEY_Escape && ModifierActive(XKB_MOD_NAME_CTRL))
++  if (symbol == XKB_KEY_Escape)
+   {
+-    RequestShutdown();
++    ConfirmExit();
+   }
+   else if (symbol == XKB_KEY_F10)
+   {
+diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
+index 8d0ae0c..0e01bb2 100644
+--- a/Source/Core/DolphinNoGUI/PlatformX11.cpp
++++ b/Source/Core/DolphinNoGUI/PlatformX11.cpp
+@@ -192,9 +192,9 @@ void PlatformX11::ProcessEvents()
+     {
+     case KeyPress:
+       key = XLookupKeysym((XKeyEvent*)&event, 0);
+-      if (key == XK_Escape && (event.xkey.state & ControlMask))
++      if (key == XK_Escape)
+       {
+-        RequestShutdown();
++        ConfirmExit();
+       }
+       else if (key == XK_F10)
+       {
