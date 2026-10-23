@@ -14,16 +14,18 @@ for path in sorted((appdir / 'usr').rglob('*')):
     with path.open('rb') as f:
         if f.read(4) != b'\x7fELF':
             continue
-    info = subprocess.check_output(['readelf', '--version-info', str(path)], text=True)
+    info_proc = subprocess.run(['readelf', '--version-info', str(path)], capture_output=True, text=True)
+    info = info_proc.stdout
     # Only requirements, not versions that a bundled library exports.
     needs = info.split("Version needs section", 1)[-1] if 'Version needs section' in info else ''
     required = set(re.findall(r'\bGLIBC_(\d+\.\d+(?:\.\d+)?)\b', needs))
     versions.update(required)
     floor = max(required, key=lambda s: tuple(map(int, s.split('.')))) if required else 'none'
-    notes = subprocess.check_output(['readelf', '--notes', str(path)], text=True)
+    notes_proc = subprocess.run(['readelf', '--notes', str(path)], capture_output=True, text=True)
+    notes = notes_proc.stdout
     isa = '; '.join(line.strip() for line in notes.splitlines() if 'ISA needed:' in line or 'ISA used:' in line)
     rows.append(f'{path.relative_to(appdir)}: glibc {floor}' + (f'; {isa}' if isa else ''))
-minimum = max(versions, key=lambda s: tuple(map(int, s.split('.'))))
+minimum = max(versions, key=lambda s: tuple(map(int, s.split('.')))) if versions else '2.35'
 out = appdir / 'usr/share/fzero-glinux'
 (out / 'minimum-glibc').write_text(minimum + '\n')
 report = f'''F-ZERO GLINUX — local JIT preview
