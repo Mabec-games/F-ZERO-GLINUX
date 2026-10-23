@@ -967,3 +967,8 @@ text; ignore it if fetched again.
 - Update (same day): MODS reworked into a single list. "Add mod folder..." picks any folder; the type is detected (tex1_*.dds/png = texture pack, metadata.json = graphics mod). Folders stay where they are and the launcher symlinks enabled ones into Load/Textures/GFZE01 or Load/GraphicMods/GFZE01. The list is in `<user>/Config/glinux-mods.txt`. The custom_textures/graphics_mods config flags are now set automatically. Hand-installed folders in Load show as "always on" until unticked; unticking moves them to `<user>/Mods/`. Dolphin patch: Common/FileSearch.cpp follows directory symlinks.
 - Launcher: Host/Join buttons moved from under PLAY into a rewritten "PLAY ONLINE" section (Your name / Host a room / Join a room with room-code field / Advanced: LAN, direct IP, UDP port, input buffer). Hints wrap (HintText helper). AppImage p2p-online-ui-20261023.
 - Netplay lobby now uses the launcher font (Noto Sans Medium 18px) and colours via shared tools/launcher_style.hpp. AppImage p2p-lobby-font-20261023.
+
+## Release v0.Online-Mods (2026-10-23)
+- "F-ZERO GLINUX Version 0.Online&Mods", tag v0.Online-Mods (points at 6adffbf; the force-move to 3ff1b97 was blocked, so the tag stayed). Assets: the Flatpak built locally (font bundled) and the AppImage from CI run 40007420149 (built from 3ff1b97, smoke tests passed on Ubuntu 22.04/24.04, Debian 12, Fedora 40).
+- Launcher font now lives in the repo (assets/fonts, SIL OFL 1.1) because Ubuntu 22.04 has no Noto Sans Medium; CI fails if it is missing from the AppImage.
+- Each push or web edit to main cancels the running CI build (concurrency cancel-in-progress).
