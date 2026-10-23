@@ -45,6 +45,10 @@ jobs:
           export CXX=g++-13
           export JOBS=$(nproc)
           export GLINUX_CMAKE_ARGS="-DCMAKE_C_FLAGS=-march=x86-64 -DCMAKE_CXX_FLAGS=-march=x86-64"
+          # GCC 13 needs GLIBCXX_3.4.32, but Ubuntu 22.04, Debian 12 and SteamOS
+          # only ship 3.4.30. linuxdeploy never bundles libstdc++, so link the
+          # C++ runtime statically into our executables.
+          export LDFLAGS="-static-libstdc++ -static-libgcc"
           bash scripts/build-glinux.sh
 
       - name: Download linuxdeploy
@@ -67,6 +71,18 @@ jobs:
           echo "Detected minimum glibc requirement: $REQUIRED_GLIBC"
           # Verify that minimum glibc is <= 2.35 (Ubuntu 22.04 baseline)
           python3 -c "import sys; sys.exit(0 if float('$REQUIRED_GLIBC') <= 2.35 else 1)"
+
+          # Verify no shipped ELF needs a newer libstdc++ than Ubuntu 22.04 /
+          # Debian 12 provide (GLIBCXX_3.4.30).
+          rm -rf squashfs-root && ./"$APPIMAGE" --appimage-extract >/dev/null
+          MAX_GLIBCXX=$(find squashfs-root/usr -type f \( -perm -u+x -o -name '*.so*' \) -exec sh -c 'readelf -V "$1" 2>/dev/null' _ {} \; \
+            | grep -oE 'GLIBCXX_[0-9]+\.[0-9]+\.[0-9]+' | sort -uV | tail -n1)
+          echo "Highest GLIBCXX requirement: ${MAX_GLIBCXX:-none}"
+          rm -rf squashfs-root
+          if [ -n "$MAX_GLIBCXX" ] && [ "$(printf '%s\nGLIBCXX_3.4.30\n' "$MAX_GLIBCXX" | sort -V | tail -n1)" != "GLIBCXX_3.4.30" ]; then
+            echo "::error::AppImage requires $MAX_GLIBCXX, newer than Ubuntu 22.04/Debian 12 (GLIBCXX_3.4.30)"
+            exit 1
+          fi
 
       - name: Upload AppImage Artifact
         uses: actions/upload-artifact@v4
@@ -110,24 +126,37 @@ jobs:
       - name: Install desktop dependencies (container)
         if: matrix.container != ''
         run: |
+          # Libraries a normal desktop install already has; linuxdeploy
+          # deliberately leaves these to the host.
           if command -v apt-get >/dev/null 2>&1; then
             apt-get update
             apt-get install -y --no-install-recommends \
-              libx11-6 libxext6 libxrandr2 libxi6 libwayland-client0 libasound2 ca-certificates file
+              libx11-6 libxext6 libxrandr2 libxi6 libwayland-client0 libasound2 \
+              libusb-1.0-0 libgl1 zlib1g ca-certificates file binutils
           elif command -v dnf >/dev/null 2>&1; then
-            dnf install -y libX11 libXext libXrandr libXi wayland-client alsa-lib file
+            dnf install -y libX11 libXext libXrandr libXi libwayland-client alsa-lib \
+              libusb1 mesa-libGL zlib file binutils
           fi
 
       - name: Smoke test AppImage
+        shell: bash
         run: |
+          set -euo pipefail
           chmod +x dist/*.AppImage
           APPIMAGE=$(ls dist/*.AppImage | head -n1)
-          
+
           echo "=== Compatibility report on ${{ matrix.name }} ==="
-          ./"$APPIMAGE" --appimage-extract-and-run --compatibility
-          
+          ./"$APPIMAGE" --appimage-extract-and-run --compatibility 2>&1
+
+          echo "=== Unresolved libraries on ${{ matrix.name }} ==="
+          ./"$APPIMAGE" --appimage-extract >/dev/null
+          MISSING=$(LD_LIBRARY_PATH=squashfs-root/usr/lib ldd squashfs-root/usr/bin/ModernGekko squashfs-root/usr/bin/moderngekko-run 2>&1 \
+            | grep -E "not found" || true)
+          echo "${MISSING:-none}"
+
           echo "=== Launcher CLI test on ${{ matrix.name }} ==="
-          ./"$APPIMAGE" --appimage-extract-and-run --help
+          ./"$APPIMAGE" --appimage-extract-and-run --help 2>&1
+          [ -z "$MISSING" ]
 
   release:
     name: Publish Release Asset
