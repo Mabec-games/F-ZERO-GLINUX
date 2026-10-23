@@ -14,8 +14,8 @@
 </p>
 
 F-ZERO GLINUX brings together a custom launcher, graphics settings and modern
-controller options around a Dolphin-derived runtime. The current playable
-preview uses **Dolphin JIT** through ModernGekko. Static recompilation remains
+controller options around a Dolphin-derived runtime.
+Static recompilation with JIT through ModernGekko remains
 experimental; these packages are not a completed static recompilation release.
 
 Bring your own **F-ZERO GX USA (GFZE01)** image in **ISO or RVZ** format. Game
@@ -34,9 +34,8 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
 
-The current target is the game's normal **60 FPS** operation. Higher internal
-resolutions do not add detail to the original textures; an above-60-FPS mode is
-not included. Performance and available AA modes depend on your hardware.
+The current target is the game's normal **60 FPS** operation.
+Performance and available AA modes depend on your hardware.
 
 <p align="center">
   <img src="docs/images/race-finish.png" alt="A first-place finish in F-ZERO GX" width="100%">
@@ -54,7 +53,7 @@ The launcher's **MODS** section supports Dolphin texture packs and graphics mods
 
 1. Download a mod, for example the
    [F-ZERO GX HD texture pack](https://forums.dolphin-emu.org/Thread-f-zero-gx-hd-ai-05-01-2022)
-   from the Dolphin forums, and unpack it anywhere.
+   , and unpack it anywhere.
 2. Open **MODS**, choose **Add mod folder…** and pick the mod's folder.
 3. Start the game.
 
@@ -79,19 +78,13 @@ Online play is built on Dolphin netplay, so it currently works like local
 multiplayer:
 
 - **Split screen for up to 4 players.** Every player sees the same shared
-  split-screen picture, not their own full-screen view. Separate full-screen views
-  per player are a goal for a later version.
+  split-screen picture, not their own full-screen view (yet).
 - **VS Battle only.** Grand Prix and Time Attack have a single player.
 - **No CPU racers** in VS Battle.
 - The slowest machine sets the pace for everyone, so a quick connection and
   similar hardware give the smoothest races.
 
 ## Choose your package
-
-**Both packages use SDL3. There is no SDL2 variant in this repository.** SDL is
-used for controller input and the launcher; AppImage and Flatpak are packaging
-formats, not different SDL versions. Neither package needs a separate host SDL2
-installation. Both use the same launcher and Dolphin JIT gameplay backend.
 
 | | AppImage | Flatpak |
 |---|---|---|
@@ -101,12 +94,6 @@ installation. Both use the same launcher and Dolphin JIT gameplay backend.
 | Best fit | Compatible, recent Linux systems; portable single-file launch | The preferred candidate for older distros and Bazzite testing |
 | Game import | Browse to your own ISO/RVZ | Put the ISO/RVZ in Downloads, which the sandbox can read |
 | Save location | `~/.local/share/fzero-glinux` by default | `~/.var/app/io.github.mabecgames.FZeroGLinux/data/fzero-glinux` |
-
-Both builds have been confirmed working by the project owner on the development
-machine. This is **not** a claim that every Arch, Debian, Bazzite or Steam Deck
-configuration has been tested. Flatpak still needs a supported host kernel,
-Flatpak installation and compatible graphics drivers. Its runtime may be
-downloaded the first time you install the application.
 
 The two packages keep separate profiles. Switching package formats does not
 automatically transfer your saves.
