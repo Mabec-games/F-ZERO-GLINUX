@@ -49,21 +49,6 @@ try:
         elif subprocess.run(command + ['--reverse', '--check', str(patch)], cwd=tree, env=env, capture_output=True).returncode != 0:
             raise RuntimeError(f'Patch conflicts in snapshot: {patch.name}; working checkout untouched')
     shutil.copytree(root / 'assets', source / 'assets')
-    # The Freedesktop runtime has no Noto Sans, so the launcher font is taken
-    # from the build host (Arch or Debian layout) and bundled.
-    fonts = source / 'fonts'
-    fonts.mkdir()
-    for font_dir in [Path('/usr/share/fonts/noto'), Path('/usr/share/fonts/truetype/noto')]:
-        for name in ['NotoSans-Medium.ttf', 'NotoSans-Regular.ttf']:
-            if (font_dir / name).is_file() and not (fonts / name).exists():
-                shutil.copy2(font_dir / name, fonts / name)
-    for licence in [Path('/usr/share/licenses/noto-fonts/LICENSE'),
-                    Path('/usr/share/doc/fonts-noto-core/copyright')]:
-        if licence.is_file():
-            shutil.copy2(licence, fonts / 'LICENSE')
-            break
-    if not (fonts / 'NotoSans-Medium.ttf').exists() or not (fonts / 'LICENSE').exists():
-        raise RuntimeError('Noto Sans Medium and its licence are required; install the Noto fonts')
     shutil.copytree(root / 'packaging/flatpak', source / 'flatpak')
     shutil.copy2(root / 'packaging/fzero-glinux.svg', source / 'fzero-glinux.svg')
     manifest = json.loads((root / 'packaging/flatpak/io.github.mabecgames.FZeroGLinux.json').read_text())

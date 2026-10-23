@@ -21,8 +21,9 @@ install -Dm755 _build/ModernGekko /app/bin/ModernGekko
 install -Dm755 _build/moderngekko-run /app/bin/moderngekko-run
 cp -a _build/Sys /app/bin/Sys
 cp -a assets/launcher /app/bin/Assets
-install -Dm644 fonts/NotoSans-*.ttf -t /app/bin/Assets
-install -Dm644 fonts/LICENSE /app/share/licenses/fzero-glinux/NotoSans.txt
+# The Freedesktop runtime has no Noto Sans; the repo carries the launcher font.
+install -Dm644 assets/fonts/NotoSans-*.ttf -t /app/bin/Assets
+install -Dm644 assets/fonts/OFL.txt /app/share/licenses/fzero-glinux/NotoSans.txt
 install -Dm755 flatpak/fzero-glinux /app/bin/fzero-glinux
 install -Dm644 flatpak/io.github.mabecgames.FZeroGLinux.desktop /app/share/applications/io.github.mabecgames.FZeroGLinux.desktop
 install -Dm644 fzero-glinux.svg /app/share/icons/hicolor/scalable/apps/io.github.mabecgames.FZeroGLinux.svg
