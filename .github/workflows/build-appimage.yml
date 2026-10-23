@@ -78,8 +78,72 @@ jobs:
             dist/*.sha256
           retention-days: 14
 
+  smoke-test:
+    name: Smoke Test (${{ matrix.name }})
+    needs: build
+    runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'Ubuntu 22.04 LTS (Jammy)'
+            runs-on: ubuntu-22.04
+            container: ''
+          - name: 'Ubuntu 24.04 LTS (Noble)'
+            runs-on: ubuntu-24.04
+            container: ''
+          - name: 'Debian 12 (Bookworm)'
+            runs-on: ubuntu-latest
+            container: 'debian:bookworm-slim'
+          - name: 'Fedora 40'
+            runs-on: ubuntu-latest
+            container: 'fedora:40'
+
+    steps:
+      - name: Download AppImage Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: F-ZERO-GLINUX-AppImage
+          path: dist
+
+      - name: Install desktop dependencies (container)
+        if: matrix.container != ''
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              libx11-6 libxext6 libxrandr2 libxi6 libwayland-client0 libasound2 ca-certificates file
+          elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y libX11 libXext libXrandr libXi wayland-client alsa-lib file
+          fi
+
+      - name: Smoke test AppImage
+        run: |
+          chmod +x dist/*.AppImage
+          APPIMAGE=$(ls dist/*.AppImage | head -n1)
+          
+          echo "=== Compatibility report on ${{ matrix.name }} ==="
+          ./"$APPIMAGE" --appimage-extract-and-run --compatibility
+          
+          echo "=== Launcher CLI test on ${{ matrix.name }} ==="
+          ./"$APPIMAGE" --appimage-extract-and-run --help
+
+  release:
+    name: Publish Release Asset
+    needs: [build, smoke-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: F-ZERO-GLINUX-AppImage
+          path: dist
+
       - name: Release Asset
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
