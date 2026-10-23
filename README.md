@@ -18,6 +18,7 @@ experimental; these packages are not a completed static recompilation release.
 
 Bring your own **F-ZERO GX USA (GFZE01)** image in **ISO or RVZ** format. Game
 disc contents and personal memory-card saves are not included in the packages.
+**WIP, Issues may occur, blame the robots... but if it works its all thanks to me.
 
 ## Built for the starting grid
 
