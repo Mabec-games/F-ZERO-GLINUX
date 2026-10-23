@@ -1,5 +1,51 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c0548a0..93ab90e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -417,6 +417,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+         tools/moderngekko_run.cpp
+         tools/netplay_compatibility.cpp
+         tools/netplay_session.cpp
++        tools/netplay_room_code.cpp
+         tools/frontend_config.cpp
+         tools/dol_patch.cpp
+         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
+@@ -515,14 +516,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+ 
+     add_executable(moderngekko-launcher
+         tools/moderngekko_launcher.cpp
++        tools/netplay_room_code.cpp
+         tools/frontend_config.cpp
++        tools/graphics_mods.cpp
+         tools/dol_patch.cpp
+         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
+         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
+     target_include_directories(moderngekko-launcher PRIVATE
+         "${CMAKE_CURRENT_SOURCE_DIR}/tools"
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Source/Core"
+-        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Externals/imgui/imgui/backends")
++        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Externals/imgui/imgui/backends"
++        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Externals/picojson")
+     # The launcher only calls the game-inspection surface directly, but the
+     # Dolphin static libraries still require the Host_* callbacks implemented
+     # in the runtime object. Keep that object from being discarded by the
+@@ -671,6 +675,14 @@ if(BUILD_TESTING)
+     target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
+     add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
+ 
++    add_executable(moderngekko_netplay_room_code_test
++        tests/netplay_room_code_test.cpp
++        tools/netplay_room_code.cpp)
++    target_include_directories(moderngekko_netplay_room_code_test PRIVATE
++        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
++    target_compile_features(moderngekko_netplay_room_code_test PRIVATE cxx_std_23)
++    add_test(NAME moderngekko.netplay_room_code COMMAND moderngekko_netplay_room_code_test)
++
+     # Header-only, so the test needs no companion translation unit.
+     add_executable(moderngekko_launcher_savestates_test
+         tests/launcher_savestates_test.cpp)
 diff --git a/include/moderngekko/runtime.hpp b/include/moderngekko/runtime.hpp
-index 0adc855..49327ac 100644
+index 0adc855..cfb5e4d 100644
 --- a/include/moderngekko/runtime.hpp
 +++ b/include/moderngekko/runtime.hpp
 @@ -4,6 +4,7 @@
@@ -10,7 +56,7 @@ index 0adc855..49327ac 100644
  #include <memory>
  #include <optional>
  #include <string>
-@@ -32,6 +33,12 @@ struct GraphicsSettings
+@@ -32,6 +33,14 @@ struct GraphicsSettings
  {
    std::string backend;
    std::optional<int> internal_resolution_scale;
@@ -20,10 +66,12 @@ index 0adc855..49327ac 100644
 +  std::string anti_aliasing = "off";
 +  int anisotropy = 1;
 +  std::string aspect_ratio; // Empty preserves Dolphin configuration.
++  bool custom_textures = false; // Load/Textures/<game id>
++  bool graphics_mods = false;   // Load/GraphicMods, per-game profile
  };
  
  struct AudioSettings
-@@ -59,6 +66,8 @@ enum class WindowSystem
+@@ -59,6 +68,8 @@ enum class WindowSystem
  
  struct RuntimeConfig
  {
@@ -33,7 +81,7 @@ index 0adc855..49327ac 100644
    std::filesystem::path user_directory;
    ModuleSource module;
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..7513a16 100644
+index f9b5405..3132d42 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -13,6 +13,7 @@
@@ -116,7 +164,7 @@ index f9b5405..7513a16 100644
    const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
    UICommon::InitControllers(wsi);
    impl->controllers_initialized = true;
-@@ -665,6 +689,22 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -665,6 +689,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    if (impl->config.graphics.internal_resolution_scale)
      Config::SetBase(Config::GFX_EFB_SCALE,
                      *impl->config.graphics.internal_resolution_scale);
@@ -127,6 +175,8 @@ index f9b5405..7513a16 100644
 +    Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
 +  }
 +  Config::SetBase(Config::GFX_VSYNC, impl->config.graphics.vsync);
++  Config::SetBase(Config::GFX_HIRES_TEXTURES, impl->config.graphics.custom_textures);
++  Config::SetBase(Config::GFX_MODS_ENABLE, impl->config.graphics.graphics_mods);
 +  Config::SetBase(Config::GFX_MSAA, impl->config.graphics.anti_aliasing == "msaa4" ? 4u : 1u);
 +  Config::SetBase(Config::GFX_SSAA, false);
 +  Config::SetBase(Config::GFX_ENHANCE_POST_SHADER,
@@ -139,7 +189,7 @@ index f9b5405..7513a16 100644
    Config::SetBase(Config::GFX_SHADER_CACHE, true);
    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                    ShaderCompilationMode::AsynchronousUberShaders);
-@@ -792,6 +832,12 @@ RuntimeRunResult Runtime::Run() {
+@@ -792,6 +834,12 @@ RuntimeRunResult Runtime::Run() {
    m_impl->booted = true;
    m_impl->present_hook =
        GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
@@ -307,8 +357,64 @@ index 6bb9e0e..f2ad6d4 100644
    fs::remove_all(directory);
    return 0;
  }
+diff --git a/tests/netplay_room_code_test.cpp b/tests/netplay_room_code_test.cpp
+new file mode 100644
+index 0000000..e07c356
+--- /dev/null
++++ b/tests/netplay_room_code_test.cpp
+@@ -0,0 +1,50 @@
++#include "netplay_room_code.hpp"
++
++#include <cstdio>
++#include <set>
++#include <string>
++
++namespace {
++bool Fail(const char *message) {
++  std::fprintf(stderr, "%s\n", message);
++  return false;
++}
++
++bool Run() {
++  std::set<std::string> first_words;
++  for (unsigned int byte = 0; byte < 256; ++byte) {
++    char host_code[9];
++    std::snprintf(host_code, sizeof(host_code), "%02x%02x%02x%02x", byte,
++                  255 - byte, (byte * 7) & 0xff, (byte * 13) & 0xff);
++    const auto encoded = moderngekko::frontend::EncodeRoomCode(host_code);
++    if (!encoded)
++      return Fail("valid host code was not encoded");
++    if (moderngekko::frontend::DecodeRoomCode(*encoded) != host_code)
++      return Fail("room code did not round-trip");
++    first_words.insert(encoded->substr(0, encoded->find('-')));
++  }
++  if (first_words.size() != 256)
++    return Fail("room code words are not unique");
++
++  const auto encoded = moderngekko::frontend::EncodeRoomCode("00ff10ab");
++  if (!encoded)
++    return Fail("example host code was not encoded");
++  std::string relaxed;
++  for (const char c : *encoded)
++    relaxed += c == '-' ? ' ' : static_cast<char>(c | 0x20);
++  if (moderngekko::frontend::DecodeRoomCode("  " + relaxed + " ") != "00ff10ab")
++    return Fail("lowercase, space-separated room code was rejected");
++
++  if (moderngekko::frontend::EncodeRoomCode("00ff10a") ||
++      moderngekko::frontend::EncodeRoomCode("00ff10ag"))
++    return Fail("malformed host code was encoded");
++  if (moderngekko::frontend::DecodeRoomCode("192.168.1.50") ||
++      moderngekko::frontend::DecodeRoomCode("localhost") ||
++      moderngekko::frontend::DecodeRoomCode("FALCON-PICO-SAMURAI") ||
++      moderngekko::frontend::DecodeRoomCode("FALCON-PICO-SAMURAI-NOTAWORD"))
++    return Fail("non-room-code text was decoded");
++  return true;
++}
++} // namespace
++
++int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..d4123c7 100644
+index 03740d4..3e926f4 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -319,7 +425,22 @@ index 03740d4..d4123c7 100644
  #include <string_view>
  
  namespace fs = std::filesystem;
-@@ -73,12 +74,52 @@ std::string_view ControllerSectionPrefix() {
+@@ -26,14 +27,6 @@ std::string Lower(std::string value) {
+   return value;
+ }
+ 
+-bool ValidNetplayAddress(std::string_view value) {
+-  if (value.empty() || value.size() > 253)
+-    return false;
+-  return std::ranges::all_of(value, [](unsigned char c) {
+-    return std::isalnum(c) || c == '.' || c == '-' || c == '_';
+-  });
+-}
+-
+ std::string NormalizeGraphicsBackend(std::string value) {
+   const std::string lower = Lower(Trim(std::move(value)));
+   if (lower == "vulkan")
+@@ -73,12 +66,60 @@ std::string_view ControllerSectionPrefix() {
  
  } // namespace
  
@@ -358,6 +479,14 @@ index 03740d4..d4123c7 100644
 +    if (error) *error = e.what();
 +    return false;
 +  }
++}
++
++bool ValidNetplayAddress(std::string_view value) {
++  if (value.empty() || value.size() > 253)
++    return false;
++  return std::ranges::all_of(value, [](unsigned char c) {
++    return std::isalnum(c) || c == '.' || c == '-' || c == '_';
++  });
 +}
 +
  const std::vector<ResolutionOption> &SupportedResolutions() {
@@ -406,7 +535,19 @@ index 03740d4..d4123c7 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -185,10 +249,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +204,11 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+     } else if (key == "fullscreen") {
+       if (!ParseBoolean(value, &config.fullscreen))
+         return {.error = "fullscreen must be true or false"};
++    } else if (key == "custom_textures" || key == "graphics_mods") {
++      bool &setting = key == "custom_textures" ? config.custom_textures
++                                               : config.graphics_mods;
++      if (!ParseBoolean(value, &setting))
++        return {.error = key + " must be true or false"};
+     } else if (key == "nickname")
+       config.netplay_nickname = raw_value;
+     else if (key == "address")
+@@ -185,10 +254,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -425,7 +566,7 @@ index 03740d4..d4123c7 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,7 +282,11 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +287,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -438,7 +579,22 @@ index 03740d4..d4123c7 100644
        config.netplay_nickname.empty() ||
        config.netplay_nickname.size() > 30 ||
        config.netplay_nickname.find_first_of("\r\n") != std::string::npos ||
-@@ -249,10 +325,15 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+-      !ValidNetplayAddress(config.netplay_address) ||
+-      config.netplay_address.find_first_of("\r\n") != std::string::npos ||
+       config.netplay_port == 0) {
+     if (error)
+       *error = "invalid frontend settings";
+     return false;
+   }
++  if (!ValidNetplayAddress(config.netplay_address)) {
++    if (error)
++      *error = "Room code / Host IP must be a room code, IP address or host name";
++    return false;
++  }
+   if (config.netplay_buffer != "auto") {
+     unsigned int frames = 0;
+     const auto parsed = std::from_chars(
+@@ -249,14 +333,22 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -455,7 +611,14 @@ index 03740d4..d4123c7 100644
         << "backend=" << graphics_backend << '\n'
         << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
         << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
-@@ -336,6 +417,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+        << '\n'
++       << "[Mods]\n"
++       << "custom_textures=" << (config.custom_textures ? "true" : "false") << '\n'
++       << "graphics_mods=" << (config.graphics_mods ? "true" : "false") << '\n'
+        << "[Input]\n";
+   for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
+     if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
+@@ -336,6 +428,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -511,7 +674,39 @@ index 03740d4..d4123c7 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -375,24 +505,30 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +513,62 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+     output << "[GCPad" << i + 1 << "]\n";
+     if (i >= controllers.size())
+       continue;
++    if (controllers[i] == KEYBOARD_DEVICE) {
++      // Dolphin's own keyboard layout, with the same X / Y swap as gamepads.
++      output << "Device = " << controllers[i] << '\n'
++             << "Buttons/A = `X`\n"
++                "Buttons/B = `Z`\n"
++             << (LoadConfig(user_directory, false).boost_on_x
++                     ? "Buttons/X = `S`\nButtons/Y = `C`\n"
++                     : "Buttons/X = `C`\nButtons/Y = `S`\n")
++             << "Buttons/Z = `D`\n"
++                "Buttons/Start = `Return`\n"
++                "Main Stick/Up = `Up`\n"
++                "Main Stick/Down = `Down`\n"
++                "Main Stick/Left = `Left`\n"
++                "Main Stick/Right = `Right`\n"
++                "Main Stick/Modifier = `Shift`\n"
++                "C-Stick/Up = `I`\n"
++                "C-Stick/Down = `K`\n"
++                "C-Stick/Left = `J`\n"
++                "C-Stick/Right = `L`\n"
++                "Triggers/L = `Q`\n"
++                "Triggers/R = `W`\n"
++                "Triggers/L-Analog = `Q`\n"
++                "Triggers/R-Analog = `W`\n"
++                "D-Pad/Up = `T`\n"
++                "D-Pad/Down = `G`\n"
++                "D-Pad/Left = `F`\n"
++                "D-Pad/Right = `H`\n";
++      continue;
++    }
      output << "Device = " << controllers[i] << '\n'
             << "Buttons/A = `Button A`\n"
                "Buttons/B = `Button B`\n"
@@ -546,10 +741,19 @@ index 03740d4..d4123c7 100644
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..5966bb4 100644
+index 3b18d05..84f3ed6 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
-@@ -11,6 +11,9 @@ namespace moderngekko::frontend {
+@@ -8,9 +8,18 @@
+ #include <vector>
+ 
+ namespace moderngekko::frontend {
++// Dolphin's X11 keyboard, used when no gamepad is connected.
++inline constexpr std::string_view KEYBOARD_DEVICE = "XInput2/0/Virtual core pointer";
++inline constexpr const char *KEYBOARD_HELP =
++    "Keyboard: arrows steer, X = A, Z = B, C = X, S = Y, D = Z, Q / W = L / R, "
++    "Enter = Start.";
++
  struct ResolutionOption {
    const char *text;
    int dolphin_scale;
@@ -559,7 +763,7 @@ index 3b18d05..5966bb4 100644
  };
  
  struct GraphicsBackendOption {
-@@ -20,12 +23,20 @@ struct GraphicsBackendOption {
+@@ -20,12 +29,22 @@ struct GraphicsBackendOption {
  
  struct ConfigResult {
    int dolphin_scale = 0;
@@ -575,12 +779,14 @@ index 3b18d05..5966bb4 100644
    std::vector<std::string> controllers;
    bool show_fps_in_title = true;
    bool fullscreen = false;
++  bool custom_textures = false;
++  bool graphics_mods = false;
 +  // Empty preserves the existing Dolphin setting.
 +  std::string aspect_ratio;
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -35,6 +46,10 @@ struct ConfigResult {
+@@ -35,6 +54,12 @@ struct ConfigResult {
    explicit operator bool() const { return error.empty(); }
  };
  
@@ -588,10 +794,12 @@ index 3b18d05..5966bb4 100644
 +bool InitializeWidescreenProfile(const std::filesystem::path &user_directory,
 +                                const std::filesystem::path &seed,
 +                                std::string *error);
++// Letters, digits, dots, hyphens and underscores: IPv4, host names and room codes.
++bool ValidNetplayAddress(std::string_view value);
  const std::vector<ResolutionOption> &SupportedResolutions();
  const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
-@@ -48,6 +63,8 @@ std::string
+@@ -48,6 +73,8 @@ std::string
  ReadConfiguredController(const std::filesystem::path &user_directory);
  std::vector<std::string>
  ReadConfiguredControllers(const std::filesystem::path &user_directory);
@@ -600,19 +808,478 @@ index 3b18d05..5966bb4 100644
  bool ControllerConfigExists(const std::filesystem::path &user_directory);
  bool GenerateControllerConfig(const std::filesystem::path &user_directory,
                                std::span<const std::string> controllers,
+diff --git a/tools/graphics_mods.cpp b/tools/graphics_mods.cpp
+new file mode 100644
+index 0000000..b89c5f2
+--- /dev/null
++++ b/tools/graphics_mods.cpp
+@@ -0,0 +1,324 @@
++#include "graphics_mods.hpp"
++
++#include <picojson.h>
++
++#include <algorithm>
++#include <fstream>
++#include <iterator>
++#include <set>
++
++namespace fs = std::filesystem;
++
++namespace moderngekko::frontend {
++namespace {
++// Mod folders are linked into the Load folders, so scans follow links.
++constexpr auto kScanOptions = fs::directory_options::skip_permission_denied |
++                              fs::directory_options::follow_directory_symlink;
++
++fs::path ModListPath(const fs::path &user_directory) {
++  return user_directory / "Config" / "glinux-mods.txt";
++}
++
++fs::path LoadFolder(const fs::path &user_directory, std::string_view game_id,
++                    ModKind kind) {
++  return kind == ModKind::TexturePack
++             ? TexturePackDirectory(user_directory, game_id)
++             : GraphicsModDirectory(user_directory, game_id);
++}
++
++// Returns folder/name, or folder/"name (2)" and so on when that is taken.
++fs::path FreeName(const fs::path &folder, const fs::path &name) {
++  std::error_code error;
++  fs::path candidate = folder / name;
++  for (int i = 2; fs::exists(fs::symlink_status(candidate, error)); ++i)
++    candidate = folder / (name.string() + " (" + std::to_string(i) + ")");
++  return candidate;
++}
++
++fs::path ProfilePath(const fs::path &user_directory, std::string_view game_id) {
++  return user_directory / "Config" / "GraphicMods" /
++         (std::string(game_id) + ".json");
++}
++
++// Mirrors Dolphin's GetTextureDirectoriesWithGameId: a folder named after the
++// game (or its region-free prefix), plus any top-level folder holding a
++// <game id>.txt, <prefix>.txt or all.txt marker.
++std::set<fs::path> ModDirectories(const fs::path &root,
++                                  std::string_view game_id) {
++  std::set<fs::path> result;
++  std::error_code error;
++  const std::string id(game_id);
++  const std::string prefix = id.substr(0, 3);
++  if (fs::is_directory(root / id, error))
++    result.insert(root / id);
++  else if (fs::is_directory(root / prefix, error))
++    result.insert(root / prefix);
++
++  if (!fs::is_directory(root, error))
++    return result;
++  for (auto it = fs::recursive_directory_iterator(
++           root, kScanOptions, error);
++       !error && it != fs::recursive_directory_iterator(); it.increment(error)) {
++    const fs::path &file = it->path();
++    if (file.extension() != ".txt")
++      continue;
++    const std::string stem = file.stem().string();
++    if (stem != id && stem != prefix && stem != "all")
++      continue;
++    const fs::path relative = file.lexically_relative(root);
++    result.insert(root / *relative.begin());
++  }
++  return result;
++}
++
++std::string MetaString(const picojson::value &meta, const char *key) {
++  const picojson::value &value = meta.get(key);
++  return value.is<std::string>() ? value.get<std::string>() : std::string();
++}
++
++bool ReadJson(const fs::path &path, picojson::value *root) {
++  std::ifstream file(path);
++  if (!file)
++    return false;
++  const std::string text{std::istreambuf_iterator<char>(file), {}};
++  return picojson::parse(*root, text).empty();
++}
++
++std::string ProfileKey(bool system, std::string_view path) {
++  return (system ? "system:" : "user:") + std::string(path);
++}
++} // namespace
++
++fs::path TexturePackDirectory(const fs::path &user_directory,
++                              std::string_view game_id) {
++  return user_directory / "Load" / "Textures" / std::string(game_id);
++}
++
++fs::path GraphicsModDirectory(const fs::path &user_directory,
++                              std::string_view game_id) {
++  return user_directory / "Load" / "GraphicMods" / std::string(game_id);
++}
++
++std::vector<GraphicsMod> ListGraphicsMods(const fs::path &user_directory,
++                                          const fs::path &sys_directory,
++                                          std::string_view game_id) {
++  std::set<std::string> enabled;
++  picojson::value profile;
++  if (ReadJson(ProfilePath(user_directory, game_id), &profile) &&
++      profile.get("mods").is<picojson::array>()) {
++    for (const picojson::value &entry : profile.get("mods").get<picojson::array>()) {
++      if (entry.get("enabled").is<bool>() && entry.get("enabled").get<bool>() &&
++          entry.get("path").is<std::string>())
++        enabled.insert(ProfileKey(entry.get("source").to_str() == "system",
++                                  entry.get("path").get<std::string>()));
++    }
++  }
++
++  std::vector<GraphicsMod> mods;
++  const auto add_mods = [&](const fs::path &root, bool system) {
++    for (const fs::path &directory : ModDirectories(root, game_id)) {
++      std::error_code error;
++      for (auto it = fs::recursive_directory_iterator(directory, kScanOptions, error);
++           !error && it != fs::recursive_directory_iterator();
++           it.increment(error)) {
++        if (it->path().filename() != "metadata.json")
++          continue;
++        picojson::value metadata;
++        if (!ReadJson(it->path(), &metadata) || !metadata.is<picojson::object>())
++          continue;
++        GraphicsMod mod;
++        const picojson::value &meta = metadata.get("meta");
++        mod.title = MetaString(meta, "title");
++        mod.author = MetaString(meta, "author");
++        mod.description = MetaString(meta, "description");
++        mod.system = system;
++        mod.path = it->path().lexically_relative(root).generic_string();
++        if (mod.title.empty())
++          mod.title = it->path().parent_path().filename().string();
++        mod.enabled = enabled.contains(ProfileKey(system, mod.path));
++        mods.push_back(std::move(mod));
++      }
++    }
++  };
++  add_mods(user_directory / "Load" / "GraphicMods", false);
++  if (!sys_directory.empty())
++    add_mods(sys_directory / "Load" / "GraphicMods", true);
++  std::ranges::stable_sort(mods, {}, [](const GraphicsMod &mod) {
++    return std::pair(mod.system, mod.title);
++  });
++  return mods;
++}
++
++bool SaveGraphicsModSelection(const fs::path &user_directory,
++                              std::string_view game_id,
++                              const std::vector<GraphicsMod> &mods,
++                              std::string *error) {
++  const fs::path path = ProfilePath(user_directory, game_id);
++  picojson::value root;
++  if (!ReadJson(path, &root) || !root.is<picojson::object>())
++    root = picojson::value(picojson::object());
++  picojson::object &object = root.get<picojson::object>();
++  if (!object["mods"].is<picojson::array>())
++    object["mods"] = picojson::value(picojson::array());
++  picojson::array &entries = object["mods"].get<picojson::array>();
++
++  for (const GraphicsMod &mod : mods) {
++    const std::string key = ProfileKey(mod.system, mod.path);
++    const auto existing = std::ranges::find_if(entries, [&](const picojson::value &entry) {
++      return entry.get("path").is<std::string>() &&
++             ProfileKey(entry.get("source").to_str() == "system",
++                        entry.get("path").get<std::string>()) == key;
++    });
++    if (existing != entries.end() && existing->is<picojson::object>()) {
++      existing->get<picojson::object>()["enabled"] = picojson::value(mod.enabled);
++      continue;
++    }
++    picojson::object entry;
++    entry["source"] = picojson::value(mod.system ? "system" : "user");
++    entry["path"] = picojson::value(mod.path);
++    entry["enabled"] = picojson::value(mod.enabled);
++    entries.emplace_back(std::move(entry));
++  }
++
++  std::error_code create_error;
++  fs::create_directories(path.parent_path(), create_error);
++  std::ofstream file(path, std::ios::trunc);
++  file << root.serialize(true);
++  if (!file) {
++    if (error)
++      *error = "can't write " + path.string();
++    return false;
++  }
++  return true;
++}
++const char *ModKindName(ModKind kind) {
++  return kind == ModKind::TexturePack ? "Texture pack" : "Graphics mod";
++}
++
++std::optional<ModKind> DetectModKind(const fs::path &folder) {
++  std::error_code error;
++  bool textures = false;
++  for (auto it = fs::recursive_directory_iterator(folder, kScanOptions, error);
++       !error && it != fs::recursive_directory_iterator(); it.increment(error)) {
++    const fs::path &file = it->path();
++    if (file.filename() == "metadata.json")
++      return ModKind::GraphicsMod;
++    const std::string name = file.filename().string();
++    textures |= name.starts_with("tex1_") &&
++                (file.extension() == ".png" || file.extension() == ".dds");
++  }
++  if (textures)
++    return ModKind::TexturePack;
++  return std::nullopt;
++}
++
++std::vector<ModFolder> LoadModFolders(const fs::path &user_directory,
++                                      std::string_view game_id) {
++  std::vector<ModFolder> mods;
++  std::ifstream file(ModListPath(user_directory));
++  std::string line;
++  // Each line: on|off <tab> textures|graphics <tab> absolute path
++  while (std::getline(file, line)) {
++    const std::size_t first = line.find('\t');
++    const std::size_t second = line.find('\t', first + 1);
++    if (first == std::string::npos || second == std::string::npos)
++      continue;
++    ModFolder mod;
++    mod.enabled = line.substr(0, first) == "on";
++    mod.kind = line.substr(first + 1, second - first - 1) == "graphics"
++                   ? ModKind::GraphicsMod
++                   : ModKind::TexturePack;
++    mod.path = line.substr(second + 1);
++    mods.push_back(std::move(mod));
++  }
++  for (const ModKind kind : {ModKind::TexturePack, ModKind::GraphicsMod}) {
++    std::error_code error;
++    for (const auto &entry :
++         fs::directory_iterator(LoadFolder(user_directory, game_id, kind), error)) {
++      std::error_code type_error;
++      if (entry.is_symlink(type_error) || !entry.is_directory(type_error))
++        continue;
++      mods.push_back({.path = entry.path(), .kind = kind, .in_load_folder = true});
++    }
++  }
++  return mods;
++}
++
++bool SaveModFolders(const fs::path &user_directory,
++                    const std::vector<ModFolder> &mods, std::string *error) {
++  const fs::path path = ModListPath(user_directory);
++  std::error_code create_error;
++  fs::create_directories(path.parent_path(), create_error);
++  std::ofstream file(path, std::ios::trunc);
++  for (const ModFolder &mod : mods) {
++    if (!mod.in_load_folder)
++      file << (mod.enabled ? "on" : "off") << '\t'
++           << (mod.kind == ModKind::GraphicsMod ? "graphics" : "textures") << '\t'
++           << mod.path.string() << '\n';
++  }
++  if (!file) {
++    if (error)
++      *error = "can't write " + path.string();
++    return false;
++  }
++  return true;
++}
++
++bool MoveToModLibrary(const fs::path &user_directory, ModFolder *mod,
++                      std::string *error) {
++  const fs::path library = user_directory / "Mods";
++  std::error_code fs_error;
++  fs::create_directories(library, fs_error);
++  const fs::path destination = FreeName(library, mod->path.filename());
++  fs::rename(mod->path, destination, fs_error);
++  if (fs_error) {
++    if (error)
++      *error = "can't move " + mod->path.string() + ": " + fs_error.message();
++    return false;
++  }
++  mod->path = destination;
++  mod->in_load_folder = false;
++  return true;
++}
++
++bool ApplyModFolders(const fs::path &user_directory, std::string_view game_id,
++                     const std::vector<ModFolder> &mods, bool *textures_active,
++                     bool *graphics_mods_active, std::string *error) {
++  for (const ModKind kind : {ModKind::TexturePack, ModKind::GraphicsMod}) {
++    const fs::path folder = LoadFolder(user_directory, game_id, kind);
++    std::error_code fs_error;
++    fs::create_directories(folder, fs_error);
++    // Links are only ever made by the launcher; real folders are left alone.
++    for (const auto &entry : fs::directory_iterator(folder, fs_error)) {
++      std::error_code link_error;
++      if (entry.is_symlink(link_error))
++        fs::remove(entry.path(), link_error);
++    }
++  }
++  for (const ModFolder &mod : mods) {
++    std::error_code fs_error;
++    if (!mod.enabled || mod.in_load_folder || !fs::is_directory(mod.path, fs_error))
++      continue;
++    const fs::path link =
++        FreeName(LoadFolder(user_directory, game_id, mod.kind), mod.path.filename());
++    fs::create_directory_symlink(mod.path, link, fs_error);
++    if (fs_error) {
++      if (error)
++        *error = "can't link " + mod.path.string() + ": " + fs_error.message();
++      return false;
++    }
++  }
++
++  std::error_code fs_error;
++  *textures_active =
++      !fs::is_empty(LoadFolder(user_directory, game_id, ModKind::TexturePack), fs_error) &&
++      !fs_error;
++  // Anything in the game's graphics mod folder is wanted on, so enable all.
++  std::vector<GraphicsMod> graphics_mods = ListGraphicsMods(user_directory, {}, game_id);
++  for (GraphicsMod &mod : graphics_mods)
++    mod.enabled = true;
++  *graphics_mods_active = !graphics_mods.empty();
++  return graphics_mods.empty() ||
++         SaveGraphicsModSelection(user_directory, game_id, graphics_mods, error);
++}
++} // namespace moderngekko::frontend
+diff --git a/tools/graphics_mods.hpp b/tools/graphics_mods.hpp
+new file mode 100644
+index 0000000..8a397fe
+--- /dev/null
++++ b/tools/graphics_mods.hpp
+@@ -0,0 +1,71 @@
++#pragma once
++
++#include <filesystem>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++namespace moderngekko::frontend {
++struct GraphicsMod {
++  std::string title;
++  std::string author;
++  std::string description;
++  bool system = false;
++  // Path below Load/GraphicMods (user) or Sys/Load/GraphicMods (system), as
++  // Dolphin stores it in Config/GraphicMods/<game id>.json.
++  std::string path;
++  bool enabled = false;
++};
++
++std::filesystem::path
++TexturePackDirectory(const std::filesystem::path &user_directory,
++                     std::string_view game_id);
++std::filesystem::path
++GraphicsModDirectory(const std::filesystem::path &user_directory,
++                     std::string_view game_id);
++
++// Finds the graphics mods Dolphin would offer for this game, with their
++// enabled state from the game's graphics mod profile.
++std::vector<GraphicsMod>
++ListGraphicsMods(const std::filesystem::path &user_directory,
++                 const std::filesystem::path &sys_directory,
++                 std::string_view game_id);
++// Writes the enabled state back to the profile, keeping any per-mod settings
++// Dolphin stored there.
++bool SaveGraphicsModSelection(const std::filesystem::path &user_directory,
++                              std::string_view game_id,
++                              const std::vector<GraphicsMod> &mods,
++                              std::string *error);
++
++enum class ModKind { TexturePack, GraphicsMod };
++
++// A mod folder the player picked. The folder stays where it is; enabling it
++// links it into Dolphin's Load folder for the game.
++struct ModFolder {
++  std::filesystem::path path;
++  ModKind kind = ModKind::TexturePack;
++  bool enabled = true;
++  // A real folder inside Dolphin's Load folder (installed by hand), not a link.
++  bool in_load_folder = false;
++};
++
++// Texture packs hold tex1_* .png/.dds files; graphics mods a metadata.json.
++std::optional<ModKind> DetectModKind(const std::filesystem::path &folder);
++const char *ModKindName(ModKind kind);
++
++std::vector<ModFolder> LoadModFolders(const std::filesystem::path &user_directory,
++                                      std::string_view game_id);
++bool SaveModFolders(const std::filesystem::path &user_directory,
++                    const std::vector<ModFolder> &mods, std::string *error);
++// Moves a folder installed by hand out of Dolphin's Load folder into the mod
++// library so it can be switched off.
++bool MoveToModLibrary(const std::filesystem::path &user_directory, ModFolder *mod,
++                      std::string *error);
++// Relinks the enabled folders and enables their graphics mods. Reports
++// whether any texture pack or graphics mod is active.
++bool ApplyModFolders(const std::filesystem::path &user_directory,
++                     std::string_view game_id, const std::vector<ModFolder> &mods,
++                     bool *textures_active, bool *graphics_mods_active,
++                     std::string *error);
++} // namespace moderngekko::frontend
+diff --git a/tools/launcher_style.hpp b/tools/launcher_style.hpp
+new file mode 100644
+index 0000000..99e2fc5
+--- /dev/null
++++ b/tools/launcher_style.hpp
+@@ -0,0 +1,40 @@
++#pragma once
++
++#include <SDL3/SDL.h>
++#include <imgui.h>
++
++#include <filesystem>
++
++namespace moderngekko::frontend {
++// Medium weight with whole-pixel glyph placement keeps light text on the dark
++// panels crisp; the regular weight at 17 px rendered thin and soft.
++inline void AddLauncherFont(ImGuiIO &io) {
++  namespace fs = std::filesystem;
++  ImFontConfig font_config;
++  font_config.PixelSnapH = true;
++  for (const fs::path directory : {fs::path(SDL_GetBasePath()) / "Assets",
++                                   fs::path("/usr/share/fonts/noto"),
++                                   fs::path("/usr/share/fonts/truetype/noto"),
++                                   fs::path("/usr/share/fonts/google-noto")}) {
++    for (const char *name : {"NotoSans-Medium.ttf", "NotoSans-Regular.ttf"}) {
++      const fs::path font = directory / name;
++      if (fs::is_regular_file(font) &&
++          io.Fonts->AddFontFromFileTTF(font.string().c_str(), 18, &font_config))
++        return;
++    }
++  }
++}
++
++// The launcher's blue-on-navy colours, shared with the netplay lobby.
++inline void ApplyLauncherColors(ImGuiStyle &style) {
++  style.FrameRounding = 8;
++  style.Colors[ImGuiCol_WindowBg] = ImVec4(.025f, .045f, .08f, .96f);
++  style.Colors[ImGuiCol_Button] = ImVec4(.04f, .26f, .34f, 1);
++  style.Colors[ImGuiCol_FrameBg] = ImVec4(.07f, .12f, .18f, 1);
++  style.Colors[ImGuiCol_Header] = ImVec4(.03f, .35f, .43f, 1);
++  style.Colors[ImGuiCol_NavCursor] = ImVec4(0.1f, 0.95f, 1.0f, 1.0f);
++  style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.05f, 0.45f, 0.6f, 1.0f);
++  // Hints stay readable on the artwork.
++  style.Colors[ImGuiCol_TextDisabled] = ImVec4(.68f, .72f, .78f, 1);
++}
++} // namespace moderngekko::frontend
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..a34ec30 100644
+index 7699c3d..4d3adb1 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
-@@ -4,6 +4,7 @@
+@@ -1,9 +1,13 @@
+ #include "frontend_config.hpp"
++#include "graphics_mods.hpp"
++#include "launcher_style.hpp"
+ #include "dol_patch.hpp"
+ #include "launcher_savestates.hpp"
  #include "moderngekko/game.hpp"
++#include "netplay_room_code.hpp"
  #include "netplay_session.hpp"
  
 +#include "Common/Image.h"
  #include "DiscIO/DiscExtractor.h"
  #include "DiscIO/Filesystem.h"
  #include "DiscIO/Volume.h"
-@@ -16,6 +17,7 @@
+@@ -16,6 +20,7 @@
  #include <algorithm>
  #include <array>
  #include <atomic>
@@ -620,7 +1287,36 @@ index 7699c3d..a34ec30 100644
  #include <cstdio>
  #include <cstdlib>
  #include <filesystem>
-@@ -337,7 +339,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -123,9 +128,28 @@ std::vector<ControllerOption> EnumerateControllers()
+     result.emplace_back(std::move(option));
+   }
+   SDL_free(joystick_ids);
++  result.push_back({"Keyboard", std::string(moderngekko::frontend::KEYBOARD_DEVICE)});
+   return result;
+ }
+ 
++// Pasted codes and addresses often carry spaces or a line break at either end.
++std::string TrimmedText(std::string_view text)
++{
++  const auto first = text.find_first_not_of(" \t\r\n");
++  if (first == std::string_view::npos)
++    return {};
++  return std::string(text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1));
++}
++
++// The old default pointed Join at this same machine, which can never reach a host.
++bool IsLoopbackAddress(std::string_view address)
++{
++  std::string lower(address);
++  for (char& c : lower)
++    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++  return lower == "localhost" || lower == "::1" || lower.starts_with("127.");
++}
++
+ int FindController(const std::vector<ControllerOption>& controllers, std::string_view device)
+ {
+   const auto found = std::ranges::find(controllers, device, &ControllerOption::device);
+@@ -337,7 +361,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    return output;
  #else
@@ -633,7 +1329,7 @@ index 7699c3d..a34ec30 100644
    return std::nullopt;
  #endif
  }
-@@ -498,12 +504,128 @@ fs::path SiblingRunner(const char* argv0)
+@@ -498,12 +526,132 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -642,6 +1338,14 @@ index 7699c3d..a34ec30 100644
 +  float width = 1, height = 1;
 +  ImVec2 uv0{0, 0}, uv1{1, 1};
 +};
++
++// Grey hint text that wraps to the panel width, unlike ImGui::TextDisabled.
++void HintText(const char *text)
++{
++  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
++  ImGui::TextWrapped("%s", text);
++  ImGui::PopStyleColor();
++}
 +
 +Artwork LoadArtwork(SDL_Renderer* renderer, const fs::path& path, bool crop = false) {
 +  Artwork art;
@@ -702,11 +1406,7 @@ index 7699c3d..a34ec30 100644
 +  auto& io = ImGui::GetIO();
 +  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
 +  io.IniFilename = nullptr;
-+  const fs::path bundled_font = fs::path(SDL_GetBasePath()) / "Assets" / "NotoSans-Regular.ttf";
-+  if (fs::is_regular_file(bundled_font))
-+    io.Fonts->AddFontFromFileTTF(bundled_font.string().c_str(), 17);
-+  else if (fs::is_regular_file("/usr/share/fonts/noto/NotoSans-Regular.ttf"))
-+    io.Fonts->AddFontFromFileTTF("/usr/share/fonts/noto/NotoSans-Regular.ttf", 17);
++  moderngekko::frontend::AddLauncherFont(io);
 +  ImGui::StyleColorsDark();
 +  ImGui::GetStyle().FramePadding = ImVec2(20,14);
 +  ImGui::GetStyle().Colors[ImGuiCol_NavCursor] = ImVec4(0,1,1,1);
@@ -762,7 +1462,7 @@ index 7699c3d..a34ec30 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +634,23 @@ int main(int argc, char** argv)
+@@ -512,9 +660,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -787,7 +1487,7 @@ index 7699c3d..a34ec30 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +666,12 @@ int main(int argc, char** argv)
+@@ -530,6 +692,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -800,7 +1500,7 @@ index 7699c3d..a34ec30 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -547,7 +689,7 @@ int main(int argc, char** argv)
+@@ -547,7 +715,7 @@ int main(int argc, char** argv)
      return 1;
  
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -809,7 +1509,7 @@ index 7699c3d..a34ec30 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,6 +698,11 @@ int main(int argc, char** argv)
+@@ -556,6 +724,11 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -821,30 +1521,20 @@ index 7699c3d..a34ec30 100644
    SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
    if (!renderer)
      renderer = SDL_CreateRenderer(window, nullptr);
-@@ -571,14 +718,33 @@ int main(int argc, char** argv)
+@@ -571,14 +744,23 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
 -  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 +  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
    io.IniFilename = nullptr;
-+  const fs::path bundled_font = fs::path(SDL_GetBasePath()) / "Assets" / "NotoSans-Regular.ttf";
-+  if (fs::is_regular_file(bundled_font))
-+    io.Fonts->AddFontFromFileTTF(bundled_font.string().c_str(), 17);
-+  else if (fs::is_regular_file("/usr/share/fonts/noto/NotoSans-Regular.ttf"))
-+    io.Fonts->AddFontFromFileTTF("/usr/share/fonts/noto/NotoSans-Regular.ttf", 17);
++  moderngekko::frontend::AddLauncherFont(io);
    ImGui::StyleColorsDark();
 +  auto &style = ImGui::GetStyle();
 +  style.FramePadding = ImVec2(10, 8);
 +  style.ItemSpacing = ImVec2(10, 10);
-+  style.FrameRounding = 8;
 +  style.WindowPadding = ImVec2(24,24);
-+  style.Colors[ImGuiCol_WindowBg] = ImVec4(.025f,.045f,.08f,.96f);
-+  style.Colors[ImGuiCol_Button] = ImVec4(.04f,.26f,.34f,1);
-+  style.Colors[ImGuiCol_FrameBg] = ImVec4(.07f,.12f,.18f,1);
-+  style.Colors[ImGuiCol_Header] = ImVec4(.03f,.35f,.43f,1);
-+  style.Colors[ImGuiCol_NavCursor] = ImVec4(0.1f, 0.95f, 1.0f, 1.0f);
-+  style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.05f, 0.45f, 0.6f, 1.0f);
++  moderngekko::frontend::ApplyLauncherColors(style);
    ImGui::GetStyle().ScaleAllSizes(scale);
    ImGui::GetStyle().FontScaleDpi = scale;
    ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
@@ -856,7 +1546,30 @@ index 7699c3d..a34ec30 100644
    std::vector<fs::path> images = FindDiscImages();
    std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
    fs::path current_game = ReadDefaultGame(user_directory, release_directory);
-@@ -631,6 +797,10 @@ int main(int argc, char** argv)
+@@ -600,8 +782,20 @@ int main(int argc, char** argv)
+   std::array<char, 256> netplay_address{};
+   std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
+                 config.netplay_nickname.c_str());
+-  std::snprintf(netplay_address.data(), netplay_address.size(), "%s",
+-                config.netplay_address.c_str());
++  // Start empty rather than showing the loopback default as if it were usable.
++  if (!IsLoopbackAddress(config.netplay_address))
++    std::snprintf(netplay_address.data(), netplay_address.size(), "%s",
++                  config.netplay_address.c_str());
++  std::string online_message;
++  std::vector<moderngekko::frontend::ModFolder> mod_folders;
++  std::string mod_folders_game; // Game the list was loaded for.
++  std::string mod_message;
++  // Downloaded mods usually sit in ~/Downloads.
++  fs::path mod_browser_directory = DocumentsDirectory().parent_path() / "Downloads";
++  if (std::error_code ec; !fs::is_directory(mod_browser_directory, ec))
++    mod_browser_directory = mod_browser_directory.parent_path();
++  std::vector<fs::path> mod_browser_entries;
++  bool mod_browser_refresh = true;
+   int netplay_port = config.netplay_port;
+   bool automatic_buffer = config.netplay_buffer == "auto";
+   int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
+@@ -631,6 +825,10 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
@@ -867,7 +1580,29 @@ index 7699c3d..a34ec30 100644
    DialogState dialog;
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -774,14 +944,18 @@ int main(int argc, char** argv)
+@@ -683,15 +881,16 @@ int main(int argc, char** argv)
+       }
+       selected_controller = configured_controllers.front();
+       controller_index = FindController(controllers, selected_controller);
++      // The saved gamepad is gone and none other is connected; without this
++      // the game would start with no input at all.
++      if (controller_index < 0 && controllers.size() == 1)
++        return select_controller(0);
+       controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
+       return true;
+     }
++    // No saved choice is connected: use the keyboard, the last entry.
+     if (controller_index < 0)
+-    {
+-      std::lock_guard lock(dialog.mutex);
+-      dialog.error = "Connect an SDL-compatible controller before playing";
+-      return false;
+-    }
++      controller_index = static_cast<int>(controllers.size()) - 1;
+     return select_controller(controller_index);
+   };
+   const auto refresh_controllers = [&]
+@@ -774,14 +973,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -889,7 +1624,7 @@ index 7699c3d..a34ec30 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +994,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1023,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -899,26 +1634,70 @@ index 7699c3d..a34ec30 100644
        {
          if (ensure_controller())
          {
-@@ -828,8 +1003,7 @@ int main(int argc, char** argv)
+@@ -828,62 +1032,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
 -      ImGui::SameLine();
 -      if (ImGui::Button("Host Netplay", ImVec2(180 * scale, 42 * scale)))
-+      if (ImGui::Button("Host Netplay", ImVec2((ImGui::GetContentRegionAvail().x-style.ItemSpacing.x)/2, 38 * scale)))
-       {
-         if (ensure_controller())
-         {
-@@ -857,7 +1031,7 @@ int main(int argc, char** argv)
-         }
-       }
-       ImGui::SameLine();
+-      {
+-        if (ensure_controller())
+-        {
+-          config.netplay_nickname = netplay_nickname.data();
+-          config.netplay_address = netplay_address.data();
+-          config.netplay_port = static_cast<std::uint16_t>(netplay_port);
+-          config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
+-          config.controllers = configured_controllers.empty()
+-                                   ? std::vector<std::string>{selected_controller}
+-                                   : configured_controllers;
+-          config.controller = config.controllers.front();
+-          config.resolution = resolutions[resolution_index].text;
+-          config.show_fps_in_title = show_fps_in_title;
+-          std::string error;
+-          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+-          {
+-            launch_mode = LaunchMode::Host;
+-            done = true;
+-          }
+-          else
+-          {
+-            std::lock_guard lock(dialog.mutex);
+-            dialog.error = std::move(error);
+-          }
+-        }
+-      }
+-      ImGui::SameLine();
 -      if (ImGui::Button("Join Netplay", ImVec2(180 * scale, 42 * scale)))
-+      if (ImGui::Button("Join Netplay", ImVec2(-1, 38 * scale)))
-       {
-         if (ensure_controller())
-         {
-@@ -891,6 +1065,7 @@ int main(int argc, char** argv)
+-      {
+-        if (ensure_controller())
+-        {
+-          config.netplay_nickname = netplay_nickname.data();
+-          config.netplay_address = netplay_address.data();
+-          config.netplay_port = static_cast<std::uint16_t>(netplay_port);
+-          config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
+-          config.controllers = configured_controllers.empty()
+-                                   ? std::vector<std::string>{selected_controller}
+-                                   : configured_controllers;
+-          config.controller = config.controllers.front();
+-          config.resolution = resolutions[resolution_index].text;
+-          config.show_fps_in_title = show_fps_in_title;
+-          std::string error;
+-          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+-          {
+-            launch_mode = LaunchMode::Join;
+-            done = true;
+-          }
+-          else
+-          {
+-            std::lock_guard lock(dialog.mutex);
+-            dialog.error = std::move(error);
+-          }
+-        }
+-      }
+     }
+     else
+     {
+@@ -891,6 +1039,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -926,7 +1705,7 @@ index 7699c3d..a34ec30 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1115,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1089,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -961,7 +1740,7 @@ index 7699c3d..a34ec30 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1174,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1148,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -997,10 +1776,32 @@ index 7699c3d..a34ec30 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -1012,11 +1234,37 @@ int main(int argc, char** argv)
+@@ -1005,6 +1201,8 @@ int main(int argc, char** argv)
+       }
+       ImGui::EndCombo();
+     }
++    if (selected_controller == moderngekko::frontend::KEYBOARD_DEVICE)
++      ImGui::TextWrapped("%s", moderngekko::frontend::KEYBOARD_HELP);
+     ImGui::BeginDisabled(controller_index < 0);
+     const std::string replace_profile =
+         "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
+@@ -1012,39 +1210,325 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
+-    ImGui::TextUnformatted("Netplay");
+-    ImGui::SetNextItemWidth(220 * scale);
+-    ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
+-    ImGui::SetNextItemWidth(220 * scale);
+-    ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
+-    ImGui::SetNextItemWidth(120 * scale);
+-    ImGui::InputInt("UDP port", &netplay_port);
+-    netplay_port = std::clamp(netplay_port, 1, 65535);
+-    ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
+-    if (!automatic_buffer)
+-    {
+-      ImGui::SetNextItemWidth(180 * scale);
+-      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
 +    bool boost_on_x = config.boost_on_x;
 +    if (ImGui::Checkbox("Boost on X (swap X / Y)", &boost_on_x)) {
 +      std::string error;
@@ -1018,27 +1819,242 @@ index 7699c3d..a34ec30 100644
 +        std::lock_guard lock(dialog.mutex);
 +        dialog.error = std::move(error);
 +      }
-+    }
+     }
 +    ImGui::TextWrapped("Xbox-style layout: A accelerates, X boosts, Y takes the original X action. Sticks and triggers are preserved.");
+     ImGui::Spacing();
++    }
++    const std::string game_id =
++        current_metadata ? current_metadata.metadata->disc_id : std::string();
++    // Saves the list, relinks the folders and switches Dolphin's texture and
++    // graphics mod loading on only while something is installed.
++    const auto apply_mods = [&] {
++      std::string error;
++      bool textures = false, graphics = false;
++      if (!moderngekko::frontend::SaveModFolders(user_directory, mod_folders, &error) ||
++          !moderngekko::frontend::ApplyModFolders(user_directory, game_id, mod_folders,
++                                                  &textures, &graphics, &error)) {
++        mod_message = std::move(error);
++        return;
++      }
++      if (config.custom_textures != textures || config.graphics_mods != graphics) {
++        config.custom_textures = textures;
++        config.graphics_mods = graphics;
++        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
++          mod_message = std::move(error);
++      }
++    };
++    if (!game_id.empty() && mod_folders_game != game_id) {
++      mod_folders = moderngekko::frontend::LoadModFolders(user_directory, game_id);
++      mod_folders_game = game_id;
++      apply_mods();
++    }
++    if (ImGui::CollapsingHeader("MODS")) {
++    if (game_id.empty()) {
++      HintText("Select the game first.");
++    } else {
++      ImGui::TextWrapped("Add the folder a mod came in. Texture packs (.dds/.png files) and "
++                         "Dolphin graphics mods (metadata.json) are detected automatically.");
++      HintText("These mods only change what your own screen shows, so they also work online.");
++      if (ImGui::Button("Add mod folder...")) {
++        mod_browser_refresh = true;
++        ImGui::OpenPopup("Choose mod folder");
++      }
++      if (!mod_message.empty())
++        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%s", mod_message.c_str());
++      if (mod_folders.empty())
++        HintText("No mods added yet.");
++      std::optional<std::size_t> remove_mod;
++      for (std::size_t i = 0; i < mod_folders.size(); ++i) {
++        auto &mod = mod_folders[i];
++        ImGui::PushID(static_cast<int>(i));
++        std::error_code ec;
++        const bool missing = !fs::is_directory(mod.path, ec);
++        bool enabled = mod.enabled && !missing;
++        ImGui::BeginDisabled(missing);
++        if (ImGui::Checkbox(mod.path.filename().string().c_str(), &enabled)) {
++          std::string error;
++          // A hand-installed folder can only be switched off once it lives
++          // outside Dolphin's Load folder.
++          if (mod.in_load_folder && !enabled &&
++              !moderngekko::frontend::MoveToModLibrary(user_directory, &mod, &error)) {
++            mod_message = std::move(error);
++          } else {
++            mod.enabled = enabled;
++            mod_message.clear();
++            apply_mods();
++          }
++        }
++        ImGui::EndDisabled();
++        ImGui::SameLine();
++        ImGui::TextDisabled("%s%s", moderngekko::frontend::ModKindName(mod.kind),
++                            missing ? " - folder not found" : "");
++        if (ImGui::IsItemHovered())
++          ImGui::SetTooltip("%s", mod.path.string().c_str());
++        if (!mod.in_load_folder) {
++          ImGui::SameLine();
++          if (ImGui::SmallButton("Remove"))
++            remove_mod = i;
++        }
++        ImGui::PopID();
++      }
++      if (remove_mod) {
++        mod_folders.erase(mod_folders.begin() + static_cast<std::ptrdiff_t>(*remove_mod));
++        mod_message.clear();
++        apply_mods();
++      }
++
++      ImGui::SetNextWindowSize(ImVec2(680 * scale, 520 * scale), ImGuiCond_Appearing);
++      if (ImGui::BeginPopupModal("Choose mod folder", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
++        if (mod_browser_refresh) {
++          mod_browser_entries.clear();
++          std::error_code ec;
++          for (fs::directory_iterator entries(mod_browser_directory,
++                                              fs::directory_options::skip_permission_denied, ec);
++               !ec && entries != fs::directory_iterator{}; entries.increment(ec)) {
++            std::error_code type_error;
++            if (entries->is_directory(type_error) &&
++                !entries->path().filename().string().starts_with("."))
++              mod_browser_entries.push_back(entries->path());
++          }
++          std::ranges::sort(mod_browser_entries);
++          mod_browser_refresh = false;
++        }
++        ImGui::TextWrapped("%s", mod_browser_directory.string().c_str());
++        if (ImGui::Button("Use this folder")) {
++          std::error_code ec;
++          const fs::path folder = fs::canonical(mod_browser_directory, ec);
++          const auto kind = moderngekko::frontend::DetectModKind(folder);
++          const fs::path load = fs::weakly_canonical(user_directory / "Load", ec);
++          if (!kind) {
++            mod_message = "No mod found in " + folder.filename().string() +
++                          ": expected tex1_*.dds/.png files or a metadata.json.";
++          } else if (folder.string().starts_with(load.string() + "/")) {
++            mod_message = "That folder is already installed in Dolphin's Load folder.";
++          } else if (std::ranges::any_of(mod_folders, [&](const auto &mod) {
++                       return mod.path == folder; })) {
++            mod_message = folder.filename().string() + " is already in the list.";
++          } else {
++            mod_folders.push_back({.path = folder, .kind = *kind});
++            mod_message.clear();
++            apply_mods();
++          }
++          ImGui::CloseCurrentPopup();
++        }
++        ImGui::SameLine();
++        if (ImGui::Button("Parent folder")) {
++          mod_browser_directory = mod_browser_directory.parent_path();
++          mod_browser_refresh = true;
++        }
++        ImGui::SameLine();
++        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
++            ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
++        HintText("Open the mod's folder, then press Use this folder.");
++        if (ImGui::BeginChild("Mod folders", ImVec2(0, 0))) {
++          for (const fs::path &path : mod_browser_entries) {
++            if (ImGui::Selectable(("[Folder] " + path.filename().string()).c_str(), false,
++                                  ImGuiSelectableFlags_NoAutoClosePopups)) {
++              mod_browser_directory = path;
++              mod_browser_refresh = true;
++            }
++          }
++        }
++        ImGui::EndChild();
++        ImGui::EndPopup();
++      }
++    }
 +    ImGui::Spacing();
 +    }
-+    if (ImGui::CollapsingHeader("ONLINE SETTINGS")) {
-     ImGui::TextUnformatted("Netplay");
-     ImGui::SetNextItemWidth(220 * scale);
-     ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
-+    if (ImGui::IsItemActivated()) SDL_StartTextInput(window);
-+    if (ImGui::IsItemDeactivated()) SDL_StopTextInput(window);
-     ImGui::SetNextItemWidth(220 * scale);
-     ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
-+    if (ImGui::IsItemActivated()) SDL_StartTextInput(window);
-+    if (ImGui::IsItemDeactivated()) SDL_StopTextInput(window);
-     ImGui::SetNextItemWidth(120 * scale);
-     ImGui::InputInt("UDP port", &netplay_port);
-     netplay_port = std::clamp(netplay_port, 1, 65535);
-@@ -1027,24 +1275,72 @@ int main(int argc, char** argv)
-       ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
-     }
-     ImGui::Spacing();
++    if (ImGui::CollapsingHeader("PLAY ONLINE")) {
++    // Saves the online fields with the rest of the settings, then hands over
++    // to the netplay lobby in the chosen role.
++    const auto launch_online = [&](LaunchMode mode) {
++      if (!ensure_controller())
++        return;
++      config.netplay_nickname = netplay_nickname.data();
++      config.netplay_port = static_cast<std::uint16_t>(netplay_port);
++      config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
++      config.controllers = configured_controllers.empty()
++                               ? std::vector<std::string>{selected_controller}
++                               : configured_controllers;
++      config.controller = config.controllers.front();
++      config.resolution = resolutions[resolution_index].text;
++      config.show_fps_in_title = show_fps_in_title;
++      std::string error;
++      if (moderngekko::frontend::SaveConfig(user_directory, config, &error)) {
++        launch_mode = mode;
++        done = true;
++      } else {
++        online_message = std::move(error);
++      }
++    };
++    const auto text_field = [&](const char *id, const char *hint, char *buffer, std::size_t size) {
++      ImGui::SetNextItemWidth(-1);
++      ImGui::InputTextWithHint(id, hint, buffer, size);
++      if (ImGui::IsItemActivated()) SDL_StartTextInput(window);
++      if (ImGui::IsItemDeactivated()) SDL_StopTextInput(window);
++    };
++    ImGui::TextWrapped("Race friends over the internet. One player hosts a room and gets a "
++                       "room code; everyone else joins with that code. No IP addresses needed.");
++    if (!current_metadata)
++      HintText("Select the game first.");
++    ImGui::BeginDisabled(!current_metadata);
++    ImGui::Spacing();
++    ImGui::TextUnformatted("Your name");
++    text_field("##nickname", "Shown to the other players", netplay_nickname.data(),
++               netplay_nickname.size());
++
++    ImGui::SeparatorText("Host a room");
++    HintText("Opens a lobby with a 4-word room code. Send the code to your friends "
++                        "and start the race once everyone has joined.");
++    if (ImGui::Button("Host a room", ImVec2(-1, 38 * scale))) {
++      // Hosting never uses the join field, so an unfinished entry must not block it.
++      if (const std::string address = TrimmedText(netplay_address.data());
++          moderngekko::frontend::ValidNetplayAddress(address))
++        config.netplay_address = address;
++      online_message.clear();
++      launch_online(LaunchMode::Host);
++    }
++
++    ImGui::SeparatorText("Join a room");
++    HintText("Paste the room code the host sent you, for example "
++                        "FALCON-PICO-SAMURAI-ZERO.");
++    text_field("##room_code", "Room code", netplay_address.data(), netplay_address.size());
++    if (ImGui::Button("Join room", ImVec2(-1, 38 * scale))) {
++      const std::string join_target = TrimmedText(netplay_address.data());
++      if (join_target.empty() || IsLoopbackAddress(join_target)) {
++        online_message = "Paste the host's room code first.";
++      } else {
++        online_message.clear();
++        config.netplay_address = join_target;
++        // Store pasted room codes in one spelling; spaces are not valid here.
++        if (const auto host_code = moderngekko::frontend::DecodeRoomCode(join_target)) {
++          config.netplay_address = *moderngekko::frontend::EncodeRoomCode(*host_code);
++          std::snprintf(netplay_address.data(), netplay_address.size(), "%s",
++                        config.netplay_address.c_str());
++        }
++        launch_online(LaunchMode::Join);
++      }
++    }
++    if (!online_message.empty())
++      ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%s", online_message.c_str());
++
++    ImGui::Spacing();
++    if (ImGui::TreeNode("Advanced: LAN / direct IP")) {
++      HintText("Instead of a room code you can type the host's IP address in the "
++                          "join field. Direct connections use this UDP port.");
++      ImGui::SetNextItemWidth(120 * scale);
++      ImGui::InputInt("UDP port", &netplay_port);
++      netplay_port = std::clamp(netplay_port, 1, 65535);
++      ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
++      if (!automatic_buffer) {
++        ImGui::SetNextItemWidth(180 * scale);
++        ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
++      }
++      HintText("A bigger buffer smooths out lag spikes but adds input delay.");
++      ImGui::TreePop();
++    }
++    ImGui::EndDisabled();
++    ImGui::Spacing();
 +    }
      ImGui::TextUnformatted("Game disc image");
      if (selected_image)
@@ -1119,7 +2135,7 @@ index 7699c3d..a34ec30 100644
        }
        if (selected_image)
        {
-@@ -1090,16 +1386,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1574,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -1191,7 +2207,7 @@ index 7699c3d..a34ec30 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1469,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1657,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -1202,7 +2218,7 @@ index 7699c3d..a34ec30 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1201,9 +1556,29 @@ int main(int argc, char** argv)
+@@ -1201,9 +1744,29 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -1234,7 +2250,30 @@ index 7699c3d..a34ec30 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1266,6 +1641,8 @@ int main(int argc, char** argv)
+@@ -1239,15 +1802,18 @@ int main(int argc, char** argv)
+               launch_error = "The nickname was rejected by the host.";
+               break;
+             default:
+-              launch_error = "Could not reach the netplay host. Check the host name, UDP "
+-                             "port, and firewall.";
++              launch_error = moderngekko::frontend::DecodeRoomCode(config.netplay_address)
++                                 ? "Could not join the room. Check the room code and that "
++                                   "the host's lobby is still open."
++                                 : "Could not reach the netplay host. Check the host name, "
++                                   "UDP port, and firewall.";
+               break;
+             }
+           }
+           else if (launch_mode == LaunchMode::Host)
+           {
+-            launch_error = "Could not create the netplay session. Check the UDP port "
+-                           "and firewall settings.";
++            launch_error = "Could not create the netplay session. Close any other "
++                           "netplay lobby that is still open, then try again.";
+           }
+           else
+           {
+@@ -1266,6 +1832,8 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
@@ -1244,7 +2283,7 @@ index 7699c3d..a34ec30 100644
    SDL_DestroyWindow(window);
    SDL_Quit();
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..3def4cb 100644
+index d6b3569..ce92316 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -6,6 +6,7 @@
@@ -1264,7 +2303,7 @@ index d6b3569..3def4cb 100644
      else if (arg == "--automation-dir")
        config.automation.directory = value("--automation-dir");
      else if (arg == "--headless")
-@@ -246,6 +249,12 @@ int RunMain(int argc, char **argv) {
+@@ -246,6 +249,14 @@ int RunMain(int argc, char **argv) {
      return 2;
    }
    config.graphics.internal_resolution_scale = frontend_config.dolphin_scale;
@@ -1274,10 +2313,12 @@ index d6b3569..3def4cb 100644
 +  config.graphics.vsync = frontend_config.vsync;
 +  config.graphics.anti_aliasing = frontend_config.anti_aliasing;
 +  config.graphics.anisotropy = frontend_config.anisotropy;
++  config.graphics.custom_textures = frontend_config.custom_textures;
++  config.graphics.graphics_mods = frontend_config.graphics_mods;
    if (config.graphics.backend.empty())
      config.graphics.backend = frontend_config.graphics_backend;
    config.fullscreen = frontend_config.fullscreen;
-@@ -338,6 +347,20 @@ int RunMain(int argc, char **argv) {
+@@ -338,6 +349,20 @@ int RunMain(int argc, char **argv) {
      config.graphics.backend = "Vulkan";
  #endif
  
@@ -1298,6 +2339,405 @@ index d6b3569..3def4cb 100644
    if (netplay_role) {
      moderngekko::frontend::NetplayOptions options;
      options.role = *netplay_role;
+diff --git a/tools/netplay_room_code.cpp b/tools/netplay_room_code.cpp
+new file mode 100644
+index 0000000..6cffd5b
+--- /dev/null
++++ b/tools/netplay_room_code.cpp
+@@ -0,0 +1,113 @@
++#include "netplay_room_code.hpp"
++
++#include <array>
++#include <cctype>
++#include <vector>
++
++namespace moderngekko::frontend {
++namespace {
++// Order is part of the code format: changing it breaks codes between releases.
++constexpr std::array<std::string_view, 256> kWords{
++    "FALCON", "PICO", "SAMURAI", "GOROH", "ZODY", "JODY", "OCTOMAN", "HAWK",
++    "SHADOW", "ZODA", "DRAQ", "ROGER", "LEON", "NIGHTHAWK", "BEASTMAN", "ANTONIO",
++    "BABA", "KATE", "MUTE", "CITY", "BIGBLUE", "AEROPOLIS", "LIGHTNING", "PORTTOWN",
++    "SANDOCEAN", "FIREFIELD", "CASINO", "PALACE", "PHANTOM", "ROAD", "CYLINDER", "WAVE",
++    "SPLITOVAL", "TWIST", "DRIFT", "HIGHWAY", "LOOP", "HELIX", "JUMP", "SLIP",
++    "BOOST", "TURBO", "NITRO", "SPIN", "ATTACK", "BLAST", "BURST", "DASH",
++    "SURGE", "THRUST", "ROCKET", "JET", "GRIP", "LAP", "GRID", "POLE",
++    "APEX", "CHICANE", "PIT", "FLAG", "FINISH", "START", "PODIUM", "TROPHY",
++    "RUBY", "SAPPHIRE", "EMERALD", "DIAMOND", "GRANDPRIX", "STORY", "STAFF", "GHOST",
++    "TIME", "TRIAL", "NOVICE", "STANDARD", "EXPERT", "MASTER", "JACK", "QUEEN",
++    "KING", "CUP", "CROWN", "MEDAL", "GOLD", "SILVER", "BRONZE", "CHROME",
++    "STEEL", "IRON", "TITAN", "COBALT", "NEON", "PLASMA", "ION", "PHOTON",
++    "QUASAR", "PULSAR", "NEBULA", "COMET", "METEOR", "ORBIT", "GALAXY", "COSMOS",
++    "STAR", "NOVA", "VOID", "ZENITH", "NADIR", "ECLIPSE", "SOLAR", "LUNAR",
++    "ASTRO", "VECTOR", "VELOCITY", "MACH", "SONIC", "HYPER", "ULTRA", "MEGA",
++    "OMEGA", "ALPHA", "BETA", "GAMMA", "DELTA", "SIGMA", "THETA", "KAPPA",
++    "ZETA", "EPSILON", "LAMBDA", "OMICRON", "RHO", "TAU", "BLUE", "RED",
++    "GREEN", "YELLOW", "ORANGE", "PURPLE", "WHITE", "BLACK", "SCARLET", "CRIMSON",
++    "AZURE", "VIOLET", "AMBER", "JADE", "ONYX", "OPAL", "TOPAZ", "PEARL",
++    "QUARTZ", "GARNET", "IVORY", "EBONY", "CYAN", "MAGENTA", "STORM", "THUNDER",
++    "BOLT", "FLASH", "SPARK", "FLAME", "BLAZE", "INFERNO", "EMBER", "FROST",
++    "BLIZZARD", "CYCLONE", "TORNADO", "TYPHOON", "TEMPEST", "RAIN", "WIND", "GALE",
++    "ICE", "MAGMA", "LAVA", "VOLCANO", "CRATER", "CANYON", "DUNE", "DESERT",
++    "OASIS", "MESA", "RIDGE", "PEAK", "SUMMIT", "VALLEY", "RIVER", "HARBOR",
++    "BAY", "ISLAND", "REEF", "TIDE", "CORAL", "LAGOON", "FJORD", "GLACIER",
++    "TUNDRA", "JUNGLE", "FOREST", "MEADOW", "PRAIRIE", "TIGER", "LION", "PANTHER",
++    "JAGUAR", "WOLF", "FOX", "EAGLE", "RAVEN", "CONDOR", "VIPER", "COBRA",
++    "DRAGON", "PHOENIX", "GRIFFIN", "HYDRA", "KRAKEN", "SHARK", "ORCA", "MANTA",
++    "SCORPION", "HORNET", "WASP", "STALLION", "BLADE", "ARROW", "LANCE", "SABER",
++    "SPEAR", "SHIELD", "ARMOR", "CANNON", "LASER", "RAIL", "PIXEL", "MATRIX",
++    "CIRCUIT", "ENGINE", "PISTON", "GEAR", "TORQUE", "PILOT", "RACER", "RIVAL",
++    "CHAMPION", "LEGEND", "HERO", "ACE", "ZERO", "VORTEX", "SPRINT", "FUSION"};
++
++int HexValue(char c) {
++  if (c >= '0' && c <= '9')
++    return c - '0';
++  if (c >= 'a' && c <= 'f')
++    return c - 'a' + 10;
++  if (c >= 'A' && c <= 'F')
++    return c - 'A' + 10;
++  return -1;
++}
++
++int WordIndex(std::string_view word) {
++  for (std::size_t i = 0; i < kWords.size(); ++i) {
++    const std::string_view candidate = kWords[i];
++    if (candidate.size() != word.size())
++      continue;
++    bool equal = true;
++    for (std::size_t j = 0; j < word.size() && equal; ++j)
++      equal = std::toupper(static_cast<unsigned char>(word[j])) == candidate[j];
++    if (equal)
++      return static_cast<int>(i);
++  }
++  return -1;
++}
++
++bool IsSeparator(char c) {
++  return c == ' ' || c == '-' || c == '_' || c == '\t';
++}
++} // namespace
++
++std::optional<std::string> EncodeRoomCode(std::string_view host_code) {
++  if (host_code.size() != 8)
++    return std::nullopt;
++  std::string result;
++  for (std::size_t i = 0; i < host_code.size(); i += 2) {
++    const int high = HexValue(host_code[i]);
++    const int low = HexValue(host_code[i + 1]);
++    if (high < 0 || low < 0)
++      return std::nullopt;
++    if (!result.empty())
++      result += '-';
++    result += kWords[static_cast<std::size_t>(high * 16 + low)];
++  }
++  return result;
++}
++
++std::optional<std::string> DecodeRoomCode(std::string_view room_code) {
++  std::vector<std::string_view> words;
++  std::size_t start = 0;
++  for (std::size_t i = 0; i <= room_code.size(); ++i) {
++    if (i < room_code.size() && !IsSeparator(room_code[i]))
++      continue;
++    if (i > start)
++      words.push_back(room_code.substr(start, i - start));
++    start = i + 1;
++  }
++  if (words.size() != 4)
++    return std::nullopt;
++
++  constexpr std::string_view kHex = "0123456789abcdef";
++  std::string host_code;
++  for (const std::string_view word : words) {
++    const int index = WordIndex(word);
++    if (index < 0)
++      return std::nullopt;
++    host_code += kHex[static_cast<std::size_t>(index / 16)];
++    host_code += kHex[static_cast<std::size_t>(index % 16)];
++  }
++  return host_code;
++}
++} // namespace moderngekko::frontend
+diff --git a/tools/netplay_room_code.hpp b/tools/netplay_room_code.hpp
+new file mode 100644
+index 0000000..6a77d2c
+--- /dev/null
++++ b/tools/netplay_room_code.hpp
+@@ -0,0 +1,14 @@
++#pragma once
++
++#include <optional>
++#include <string>
++#include <string_view>
++
++namespace moderngekko::frontend {
++// A room code spells a Dolphin traversal host code (eight hex digits) as four
++// words, one per byte, so players can share it instead of an IP address.
++std::optional<std::string> EncodeRoomCode(std::string_view host_code);
++// Accepts any case and spaces, hyphens or underscores between words. Returns
++// the traversal host code, or nothing when the text is not a room code.
++std::optional<std::string> DecodeRoomCode(std::string_view room_code);
++} // namespace moderngekko::frontend
+diff --git a/tools/netplay_session.cpp b/tools/netplay_session.cpp
+index 7ef27ba..0c23f75 100644
+--- a/tools/netplay_session.cpp
++++ b/tools/netplay_session.cpp
+@@ -1,7 +1,10 @@
+ #include "netplay_session.hpp"
+ 
++#include "launcher_style.hpp"
+ #include "netplay_compatibility.hpp"
++#include "netplay_room_code.hpp"
+ 
++#include "Common/TraversalClient.h"
+ #include "Core/Boot/Boot.h"
+ #include "Core/Config/MainSettings.h"
+ #include "Core/Config/NetplaySettings.h"
+@@ -22,6 +25,7 @@
+ #include <array>
+ #include <atomic>
+ #include <chrono>
++#include <cstdlib>
+ #include <filesystem>
+ #include <iostream>
+ #include <memory>
+@@ -63,6 +67,7 @@ std::vector<ControllerOption> EnumerateControllers() {
+                       "SDL/" + std::to_string(device_id) + "/" + name});
+   }
+   SDL_free(joystick_ids);
++  result.push_back({"Keyboard", std::string(KEYBOARD_DEVICE)});
+   return result;
+ }
+ 
+@@ -185,8 +190,18 @@ public:
+     m_error = message;
+   }
+ 
+-  void OnTraversalError(Common::TraversalClient::FailureReason) override {
+-    OnConnectionError("Direct connection failed");
++  void OnTraversalError(Common::TraversalClient::FailureReason reason) override {
++    switch (reason) {
++    case Common::TraversalClient::FailureReason::BadHost:
++      OnConnectionError("Could not resolve the room code server");
++      break;
++    case Common::TraversalClient::FailureReason::VersionTooOld:
++      OnConnectionError("The room code server rejected this version");
++      break;
++    default:
++      OnConnectionError("Lost contact with the room code server");
++      break;
++    }
+   }
+ 
+   void OnTraversalStateChanged(Common::TraversalClient::State) override {}
+@@ -275,7 +290,7 @@ public:
+       return false;
+     const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+     m_window = SDL_CreateWindow(
+-        "KirbyRecomp Netplay Lobby", static_cast<int>(820 * scale),
++        "F-ZERO GLINUX Netplay Lobby", static_cast<int>(820 * scale),
+         static_cast<int>(600 * scale),
+         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+     if (!m_window)
+@@ -291,8 +306,14 @@ public:
+     ImGuiIO &io = ImGui::GetIO();
+     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+     io.IniFilename = nullptr;
++    moderngekko::frontend::AddLauncherFont(io);
+     ImGui::StyleColorsDark();
+-    ImGui::GetStyle().ScaleAllSizes(scale);
++    auto &style = ImGui::GetStyle();
++    style.FramePadding = ImVec2(10, 6);
++    style.ItemSpacing = ImVec2(10, 8);
++    style.WindowPadding = ImVec2(16, 16);
++    moderngekko::frontend::ApplyLauncherColors(style);
++    style.ScaleAllSizes(scale);
+     ImGui::GetStyle().FontScaleDpi = scale;
+     ImGui_ImplSDL3_InitForSDLRenderer(m_window, m_renderer);
+     ImGui_ImplSDLRenderer3_Init(m_renderer);
+@@ -358,6 +379,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+   std::vector<ControllerOption> available = EnumerateControllers();
+   auto last_refresh = std::chrono::steady_clock::now();
+   bool running = true;
++  bool leave = false;
+   while (running) {
+     if (!window.Frame())
+       break;
+@@ -392,19 +414,60 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+     const ImGuiViewport *viewport = ImGui::GetMainViewport();
+     ImGui::SetNextWindowPos(viewport->WorkPos);
+     ImGui::SetNextWindowSize(viewport->WorkSize);
+-    ImGui::Begin("KirbyRecomp Netplay", nullptr,
++    ImGui::Begin("F-ZERO GLINUX Netplay", nullptr,
+                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                      ImGuiWindowFlags_NoSavedSettings);
+-    ImGui::TextUnformatted(server ? "Hosting direct-IP netplay"
+-                                  : "Connected to direct-IP host");
+     if (server) {
+-      ImGui::Text("UDP port: %u", server->GetPort());
+-      for (const std::string &interface_name : server->GetInterfaceSet())
+-        ImGui::Text("%s: %s", interface_name.c_str(),
+-                    server->GetInterfaceHost(interface_name).c_str());
++      ImGui::TextUnformatted("Hosting netplay");
++      const Common::TraversalClient *traversal =
++          Common::g_TraversalClient.get();
++      std::optional<std::string> room_code;
++      if (traversal && traversal->IsConnected()) {
++        const Common::TraversalHostId host_id = traversal->GetHostID();
++        room_code = EncodeRoomCode(
++            std::string_view(host_id.data(), host_id.size()));
++      }
++      if (room_code) {
++        ImGui::Text("Room code: %s", room_code->c_str());
++        ImGui::SameLine();
++        if (ImGui::Button("Copy"))
++          SDL_SetClipboardText(room_code->c_str());
++        ImGui::TextDisabled(
++            "Share this code; players paste it under PLAY ONLINE > Join a room.");
++      } else if (traversal && traversal->HasFailed()) {
++        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f),
++                           "Room code unavailable; LAN and direct IP still work.");
++      } else {
++        ImGui::TextDisabled("Getting a room code...");
++      }
++      if (server->GetPort() != options.port)
++        ImGui::TextDisabled(
++            "UDP port %u was busy, so LAN / direct IP players must use port %u.",
++            options.port, server->GetPort());
++      if (ImGui::CollapsingHeader("LAN / direct IP")) {
++        ImGui::Text("UDP port: %u", server->GetPort());
++        for (const std::string &interface_name : server->GetInterfaceSet())
++          ImGui::Text("%s: %s", interface_name.c_str(),
++                      server->GetInterfaceHost(interface_name).c_str());
++      }
++    } else if (DecodeRoomCode(options.address)) {
++      ImGui::TextUnformatted("Joined room");
++      ImGui::Text("Room code: %s", options.address.c_str());
+     } else {
++      ImGui::TextUnformatted("Connected to direct-IP host");
+       ImGui::Text("Host: %s:%u", options.address.c_str(), options.port);
+     }
++    std::string local_ports;
++    for (std::size_t i = 0; i < wiimote_mapping.size(); ++i) {
++      if (wiimote_mapping[i] == 0 || !client.IsLocalPlayer(wiimote_mapping[i]))
++        continue;
++      local_ports += local_ports.empty() ? "" : ", ";
++      local_ports += std::to_string(i + 1);
++    }
++    if (!local_ports.empty())
++      ImGui::Text("You are Player %s", local_ports.c_str());
++    ImGui::TextDisabled("Pick VS Battle to race each other; Grand Prix and "
++                        "Time Attack only have Player 1.");
+     ImGui::Text("Input buffer: %u frames%s", ui.BufferSize(),
+                 server && options.buffer == "auto" ? " (auto)" : "");
+     ImGui::Separator();
+@@ -430,7 +493,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+             continue;
+           if (!slots.empty())
+             slots += ", ";
+-          slots += "Wii " + std::to_string(i + 1);
++          slots += "Port " + std::to_string(i + 1);
+         }
+         ImGui::TextUnformatted(slots.empty() ? "None" : slots.c_str());
+         ImGui::TableSetColumnIndex(3);
+@@ -445,7 +508,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+     }
+ 
+     ImGui::Spacing();
+-    ImGui::TextUnformatted("Local sideways Wii Remotes");
++    ImGui::TextUnformatted("Local controllers");
+     std::size_t total_assigned = 0;
+     for (const NetPlay::Player &player : players)
+       total_assigned += player.controller_count;
+@@ -485,6 +548,10 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+     if (ImGui::Button(local_ready ? "Not Ready" : "Ready", ImVec2(140, 38)))
+       client.SetReady(!local_ready);
+ 
++    ImGui::SameLine();
++    if (ImGui::Button(server ? "Close Room" : "Leave", ImVec2(140, 38)))
++      leave = true;
++
+     if (server) {
+       ImGui::SameLine();
+       const bool can_start = server->CanStart();
+@@ -506,7 +573,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+     ImGui::End();
+     window.Present();
+ 
+-    if (ui.ConnectionLost())
++    if (leave || ui.ConnectionLost())
+       running = false;
+   }
+   return false;
+@@ -524,12 +591,25 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
+   detail::SetExternalUICommon(true);
+ 
+   Config::SetBase(Config::MAIN_CPU_THREAD, true);
+-  Config::SetBase(Config::MAIN_CPU_CORE, PowerPC::CPUCore::StaticRecomp);
++  // The host sends this core to every player and it overrides the runtime's
++  // own choice, so follow the same MODERNGEKKO_STATICRECOMP rule as solo play.
++  const char *static_recomp = std::getenv("MODERNGEKKO_STATICRECOMP");
++  const bool use_static_recomp =
++      !static_recomp || !*static_recomp || *static_recomp != '0';
++#ifdef _M_ARM_64
++  constexpr PowerPC::CPUCore jit_core = PowerPC::CPUCore::JITARM64;
++#else
++  constexpr PowerPC::CPUCore jit_core = PowerPC::CPUCore::JIT64;
++#endif
++  Config::SetBase(Config::MAIN_CPU_CORE,
++                  use_static_recomp ? PowerPC::CPUCore::StaticRecomp : jit_core);
+   Config::SetBase(Config::NETPLAY_SAVEDATA_LOAD, true);
+   Config::SetBase(Config::NETPLAY_SAVEDATA_WRITE, true);
+   Config::SetBase(Config::NETPLAY_SAVEDATA_SYNC_ALL_WII, false);
+   Config::SetBase(Config::NETPLAY_SYNC_CODES, false);
+-  Config::SetBase(Config::NETPLAY_STRICT_SETTINGS_SYNC, true);
++  // Strict sync copies the host's graphics (such as internal resolution) to
++  // every player, and the slowest machine then sets the pace for everyone.
++  Config::SetBase(Config::NETPLAY_STRICT_SETTINGS_SYNC, false);
+   Config::SetBase(Config::NETPLAY_NETWORK_MODE, std::string("fixeddelay"));
+   Config::SetBase(Config::NETPLAY_USE_INDEX, false);
+ 
+@@ -554,13 +634,27 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
+ 
+   SessionUI ui(game);
+   const NetPlay::NetTraversalConfig direct{};
++  // Hosts register with the traversal server for a room code; the same UDP
++  // port still accepts LAN and direct-IP joins.
++  const NetPlay::NetTraversalConfig traversal{
++      true, Config::Get(Config::NETPLAY_TRAVERSAL_SERVER),
++      Config::Get(Config::NETPLAY_TRAVERSAL_PORT),
++      Config::Get(Config::NETPLAY_TRAVERSAL_PORT_ALT)};
+   std::unique_ptr<NetPlay::NetPlayServer> server;
+   std::unique_ptr<NetPlay::NetPlayClient> client;
+   if (options.role == NetplayRole::Host) {
+     std::cerr << "netplay: opening host on UDP port " << options.port << '\n';
+     ui.SetHosting(true);
+     server = std::make_unique<NetPlay::NetPlayServer>(options.port, false, &ui,
+-                                                      direct);
++                                                      traversal);
++    if (!server->is_connected) {
++      // Room codes work on any port, so a busy one (often a lobby that is
++      // still open) should not stop hosting.
++      std::cerr << "netplay: UDP port " << options.port
++                << " is unavailable; using a free port\n";
++      server.reset();
++      server = std::make_unique<NetPlay::NetPlayServer>(0, false, &ui, traversal);
++    }
+     if (!server->is_connected) {
+       server.reset();
+       detail::SetExternalUICommon(false);
+@@ -577,6 +671,11 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
+     client = std::make_unique<NetPlay::NetPlayClient>(
+         "127.0.0.1", server->GetPort(), &ui, options.nickname, direct,
+         static_cast<u8>(options.controllers.size()));
++  } else if (const auto host_code = DecodeRoomCode(options.address)) {
++    std::cerr << "netplay: joining room " << options.address << '\n';
++    client = std::make_unique<NetPlay::NetPlayClient>(
++        *host_code, 0, &ui, options.nickname, traversal,
++        static_cast<u8>(options.controllers.size()));
+   } else {
+     std::cerr << "netplay: connecting to " << options.address << ':'
+               << options.port << '\n';
 diff --git a/vendor/dolphin b/vendor/dolphin
 --- a/vendor/dolphin
 +++ b/vendor/dolphin

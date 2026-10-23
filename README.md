@@ -7,6 +7,8 @@
 <p align="center">
   <a href="#choose-your-package">AppImage & Flatpak</a> ·
   <a href="#start-playing">Start playing</a> ·
+  <a href="#mods--hd-textures">Mods</a> ·
+  <a href="#play-online">Play online</a> ·
   <a href="#build-from-source">Build from source</a> ·
   <a href="#project-status">Project status</a>
 </p>
@@ -29,6 +31,8 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Native widescreen:** use GX's own Screen Mode setting, saved on your memory card.
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
 - **Separate user data:** saves and settings survive package updates.
+- **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
+- **Online play:** host a room and share a 4-word room code; no IP addresses needed.
 
 The current target is the game's normal **60 FPS** operation. Higher internal
 resolutions do not add detail to the original textures; an above-60-FPS mode is
@@ -38,6 +42,49 @@ not included. Performance and available AA modes depend on your hardware.
   <img src="docs/images/race-finish.png" alt="A first-place finish in F-ZERO GX" width="100%">
   <br><em>Alright, First place!</em>
 </p>
+
+## Mods & HD textures
+
+<p align="center">
+  <img src="docs/images/hd-textures.jpg" alt="The Blue Falcon finishing first with the F-ZERO GX HD texture pack" width="100%">
+  <br><em>The <a href="https://forums.dolphin-emu.org/Thread-f-zero-gx-hd-ai-05-01-2022">F-ZERO GX HD</a> texture pack running in F-ZERO GLINUX.</em>
+</p>
+
+The launcher's **MODS** section supports Dolphin texture packs and graphics mods:
+
+1. Download a mod, for example the
+   [F-ZERO GX HD texture pack](https://forums.dolphin-emu.org/Thread-f-zero-gx-hd-ai-05-01-2022)
+   from the Dolphin forums, and unpack it anywhere.
+2. Open **MODS**, choose **Add mod folder…** and pick the mod's folder.
+3. Start the game.
+
+The launcher detects the mod type on its own: texture packs contain `.dds`/`.png`
+files, graphics mods a `metadata.json`. Each mod can be switched on or off, and your
+files stay where you put them. Mods only change what your own screen shows, so they
+also work in online play. Mods are made by their own authors and are not included
+with F-ZERO GLINUX.
+
+## Play online
+
+<p align="center">
+  <img src="docs/images/online-split-screen.jpg" alt="A two-player online VS Battle in split screen at 59.9 FPS" width="100%">
+  <br><em>Two players racing online, at full speed.</em>
+</p>
+
+Open **PLAY ONLINE** in the launcher. One player chooses **Host a room** and gets a
+4-word room code such as `FALCON-PICO-SAMURAI-ZERO`; the others paste that code and
+choose **Join room**. No IP addresses to share. Then pick **VS Battle** in the game.
+
+Online play is built on Dolphin netplay, so it currently works like local
+multiplayer:
+
+- **Split screen for up to 4 players.** Every player sees the same shared
+  split-screen picture, not their own full-screen view. Separate full-screen views
+  per player are a goal for a later version.
+- **VS Battle only.** Grand Prix and Time Attack have a single player.
+- **No CPU racers** in VS Battle.
+- The slowest machine sets the pace for everyone, so a quick connection and
+  similar hardware give the smoothest races.
 
 ## Choose your package
 
@@ -161,8 +208,8 @@ newer host can raise the resulting AppImage's minimum system requirements.
 | Static recompilation | Experimental; performance work remains |
 | Native widescreen | In-game setting; remembered in the player's save |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
-| Netplay | Experimental host/join controls; cross-machine validation remains |
-| Word-based private matchmaking | Not implemented |
+| Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
+| Mods | HD texture packs and Dolphin graphics mods from any folder |
 
 Report problems with your package type, distro, graphics backend, GPU and gamepad,
 along with the relevant log. 

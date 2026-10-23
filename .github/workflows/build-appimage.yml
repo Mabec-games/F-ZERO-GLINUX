@@ -78,6 +78,11 @@ jobs:
           MAX_GLIBCXX=$(find squashfs-root/usr -type f \( -perm -u+x -o -name '*.so*' \) -exec sh -c 'readelf -V "$1" 2>/dev/null' _ {} \; \
             | grep -oE 'GLIBCXX_[0-9]+\.[0-9]+\.[0-9]+' | sort -uV | tail -n1)
           echo "Highest GLIBCXX requirement: ${MAX_GLIBCXX:-none}"
+          # Without the bundled font the launcher falls back to ImGui's pixel font.
+          if [ ! -f squashfs-root/usr/bin/Assets/NotoSans-Medium.ttf ]; then
+            echo "::error::NotoSans-Medium.ttf is missing from the AppImage"
+            exit 1
+          fi
           rm -rf squashfs-root
           if [ -n "$MAX_GLIBCXX" ] && [ "$(printf '%s\nGLIBCXX_3.4.30\n' "$MAX_GLIBCXX" | sort -V | tail -n1)" != "GLIBCXX_3.4.30" ]; then
             echo "::error::AppImage requires $MAX_GLIBCXX, newer than Ubuntu 22.04/Debian 12 (GLIBCXX_3.4.30)"

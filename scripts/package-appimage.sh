@@ -16,9 +16,22 @@ cp -a "$build/Sys" "$appdir/usr/bin/Sys"
 cp -a "$root/assets/launcher" "$appdir/usr/bin/Assets"
 cp "$root/lib/ModernGekko/LICENSE" "$appdir/usr/share/licenses/fzero-glinux/ModernGekko.txt"
 cp "$root/lib/ModernGekko/vendor/dolphin/COPYING" "$appdir/usr/share/licenses/fzero-glinux/Dolphin.txt"
-if [[ -f /usr/share/fonts/noto/NotoSans-Regular.ttf && -f /usr/share/licenses/noto-fonts/LICENSE ]]; then
-    cp /usr/share/fonts/noto/NotoSans-Regular.ttf "$appdir/usr/bin/Assets/"
-    cp /usr/share/licenses/noto-fonts/LICENSE "$appdir/usr/share/licenses/fzero-glinux/NotoSans.txt"
+# Launcher/lobby font. Arch keeps Noto in fonts/noto, Debian/Ubuntu in
+# fonts/truetype/noto with the licence under /usr/share/doc.
+for font_dir in /usr/share/fonts/noto /usr/share/fonts/truetype/noto; do
+    for font in NotoSans-Medium.ttf NotoSans-Regular.ttf; do
+        if [[ -f "$font_dir/$font" ]]; then cp "$font_dir/$font" "$appdir/usr/bin/Assets/"; fi
+    done
+done
+for licence in /usr/share/licenses/noto-fonts/LICENSE /usr/share/doc/fonts-noto-core/copyright; do
+    if [[ -f "$licence" ]]; then
+        cp "$licence" "$appdir/usr/share/licenses/fzero-glinux/NotoSans.txt"
+        break
+    fi
+done
+if [[ -f "$appdir/usr/bin/Assets/NotoSans-Medium.ttf" && ! -f "$appdir/usr/share/licenses/fzero-glinux/NotoSans.txt" ]]; then
+    echo "Noto Sans licence not found; refusing to bundle the font without it" >&2
+    exit 1
 fi
 export APPIMAGE_EXTRACT_AND_RUN=1
 # Deploy first, then audit the complete library set before creating the image.

@@ -27,6 +27,7 @@ if [[ "$mode" == --prepare-only ]]; then
     exit 0
 fi
 mkdir -p "$root/dist"
+output="${GLINUX_FLATPAK_OUTPUT:-$root/dist/F-ZERO-GLINUX-x86_64.flatpak}"
 flatpak-builder --user --force-clean --disable-rofiles-fuse --jobs="$jobs" \
     --state-dir="$root/build/flatpak/state" --repo="$root/build/flatpak/repo" \
     "$root/build/flatpak/app" "$manifest" 2>&1 | tee "$root/build/flatpak/build.log"
@@ -34,7 +35,7 @@ flatpak-builder --user --force-clean --disable-rofiles-fuse --jobs="$jobs" \
 flatpak build --runtime "$root/build/flatpak/app" /app/bin/ModernGekko --help
 flatpak build --runtime "$root/build/flatpak/app" /app/bin/moderngekko-run --help
 flatpak build-bundle "$root/build/flatpak/repo" \
-    "$root/dist/F-ZERO-GLINUX-x86_64.flatpak" io.github.mabecgames.FZeroGLinux \
+    "$output" io.github.mabecgames.FZeroGLinux \
     --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
 printf 'Built: %s\nInstall: flatpak install --user %q\nRun: flatpak run io.github.mabecgames.FZeroGLinux\n' \
-    "$root/dist/F-ZERO-GLINUX-x86_64.flatpak" "$root/dist/F-ZERO-GLINUX-x86_64.flatpak"
+    "$output" "$output"

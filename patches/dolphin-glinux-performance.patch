@@ -14,6 +14,22 @@ index 6d5afdc..d180c81 100644
  
  [ActionReplay]
  # Add action replay cheats here.
+diff --git a/Source/Core/Common/FileSearch.cpp b/Source/Core/Common/FileSearch.cpp
+index 9aed337..c5b26d6 100644
+--- a/Source/Core/Common/FileSearch.cpp
++++ b/Source/Core/Common/FileSearch.cpp
+@@ -71,7 +71,10 @@ std::vector<std::string> DoFileSearch(std::span<const std::string_view> director
+       std::error_code error;
+       if (recursive)
+       {
+-        for (auto it = fs::recursive_directory_iterator(directory_path, error);
++        // Follow folder links: the launcher links mod folders kept elsewhere
++        // into Load/Textures and Load/GraphicMods.
++        for (auto it = fs::recursive_directory_iterator(
++                 directory_path, fs::directory_options::follow_directory_symlink, error);
+              it != fs::recursive_directory_iterator(); it.increment(error))
+           add_filtered(*it);
+       }
 diff --git a/Source/Core/Core/Host.h b/Source/Core/Core/Host.h
 index 5763950..f08e7bc 100644
 --- a/Source/Core/Core/Host.h
@@ -26,6 +42,22 @@ index 5763950..f08e7bc 100644
  };
  
  std::vector<std::string> Host_GetPreferredLocales();
+diff --git a/Source/Core/Core/NetPlay/NetPlayServerInput.cpp b/Source/Core/Core/NetPlay/NetPlayServerInput.cpp
+index 6e5a295..b43c6b5 100644
+--- a/Source/Core/Core/NetPlay/NetPlayServerInput.cpp
++++ b/Source/Core/Core/NetPlay/NetPlayServerInput.cpp
+@@ -89,6 +89,11 @@ void NetPlayServer::UpdateGBAConfig()
+ 
+ void NetPlayServer::UpdateWiimoteMapping()
+ {
++  // F-ZERO GLINUX runs a GameCube game: each assigned slot is also that
++  // player's GameCube port, or no controller reaches the game.
++  m_pad_map = m_wiimote_map;
++  UpdatePadMapping();
++
+   sf::Packet spac;
+   spac << MessageID::WiimoteMapping;
+   for (PlayerId mapping : m_wiimote_map)
 diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
 index e3581cc..4ec6b7d 100644
 --- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
