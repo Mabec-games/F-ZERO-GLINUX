@@ -12,6 +12,13 @@ CMakeUserPresets.json
 *.gci.deleted
 *.raw
 
+# Game images (bring your own; never commit)
+*.rvz
+*.iso
+*.gcm
+*.ciso
+*.wbfs
+
 # OS
 .DS_Store
 Thumbs.db

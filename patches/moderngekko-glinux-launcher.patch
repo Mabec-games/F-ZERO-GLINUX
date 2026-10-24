@@ -1780,7 +1780,7 @@ index 7699c3d..577b5d8 100644
 +  draw->AddLine(ImVec2(origin.x+28,origin.y+h-106), ImVec2(origin.x+hero-28,origin.y+h-106), IM_COL32(0,224,240,255),2);
 +  if (w > 900) {
 +    draw->AddText(ImVec2(origin.x+28,origin.y+h-85), IM_COL32(96,232,244,255), "YOUR MACHINE. YOUR RACE.");
-+    draw->AddText(ImVec2(origin.x+28,origin.y+h-58), IM_COL32(210,220,234,255), "F-ZERO GLINUX  /  LINUX EDITION");
++    draw->AddText(ImVec2(origin.x+28,origin.y+h-58), IM_COL32(210,220,234,255), "F-ZERO GLINUX  /  FOR LINUX & WINDOWS");
 +  }
 +}
 +

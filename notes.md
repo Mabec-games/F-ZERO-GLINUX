@@ -1,9 +1,40 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-10-23.
+Updated: 2026-10-25.
 
 
-## Latest update — Cross-Distro AppImage Fixes, Smoke Test Matrix & Release 0.SteamDeck/Ubuntu/Bazzite, 2026-10-23
+## Latest update — Windows Port Kickoff: Repo Moved, Dolphin Submodules Repaired, Launcher Text, 2026-10-25
+
+Goal: port the Linux-only build to Windows. Status: groundwork done, no Windows code or build yet.
+
+1. Project location moved to `C:\dev\fzero-gx-linux`:
+   - The old copy under `Downloads\fzero-gx-linux\...\F-ZERO-GLINUX-windows-port-20261025\fzero-gx-linux` was too deep: nested submodule git dirs (e.g. `.git/modules/.../cubeb/cubeb/modules/cmake/sanitizers-cmake`, 266 chars) exceeded the Windows 260-char limit, so Git reported `fatal: not a git repository` even with `core.longpaths=true` (a `subst` drive does not help, Git resolves it back to the long path).
+   - Nothing was actually missing after the USB transfer: `git fsck` on the affected submodule passed. Copied with robocopy (40,589 files, 0 failed); at the new path all submodules are at their recorded commits.
+   - Keep the repo at a short path; the MSVC/CMake Dolphin build will hit the same limit.
+   - The old Downloads copy can be deleted by the user once confirmed.
+
+2. Git setup on Windows:
+   - Remote `dev` = `https://github.com/Mabec-games/F-ZERO-GLINUX-dev.git`; `main` fast-forwarded to `467e3a4` (automatic cheats). `glinux` = public repo, `origin` = ModernGekko-Template.
+   - `core.autocrlf=false`; `core.fileMode=false` in the main repo and all submodules (Windows/USB drop the executable bit, which showed as mode-only changes on `packaging/AppRun`, `scripts/*.sh`, `cmake/asan-wrapper`).
+   - Verified: `lib/ModernGekko` tree = pristine + `moderngekko-glinux-launcher.patch`; `vendor/dolphin` tree = pristine + `dolphin-glinux-performance.patch` (the 13 modified Dolphin files are exactly that patch). Both reverse-check cleanly, so `build-glinux.sh` treats them as applied.
+
+3. Launcher footer text:
+   - `"F-ZERO GLINUX  /  LINUX EDITION"` -> `"F-ZERO GLINUX  /  FOR LINUX & WINDOWS"` (only shown when the launcher is wider than 900 px).
+   - Changed in `patches/moderngekko-glinux-launcher.patch` and in the applied `lib/ModernGekko/tools/moderngekko_launcher.cpp`. Not yet compiled or seen on screen.
+
+4. `.gitignore`: added `*.rvz`, `*.iso`, `*.gcm`, `*.ciso`, `*.wbfs`. The user's `F-Zero GX (USA).rvz` is in the repo root for testing and is ignored.
+
+Committed to the `dev` remote only (not the public `glinux` repo). Submodule working-tree changes stay unpushed, as before; the patch files are their record.
+
+5. Windows toolchain check: Ninja and Python are installed; CMake and a C++ compiler are not (only the Visual Studio Installer is present). Install VS 2022 Build Tools with "Desktop development with C++" before building.
+
+### Next steps (Windows port)
+- Audit Linux-only pieces: `scripts/*.sh` build/package scripts, DolphinNoGUI `PlatformX11.cpp`/`PlatformWayland.cpp` (need a Win32 platform), AppImage/Flatpak packaging (need a Windows zip or installer), `$XDG_DATA_HOME` paths (use `%APPDATA%`).
+- Set up an MSVC + CMake (or MSYS2/clang) build of the patched Dolphin runtime and the ModernGekko launcher.
+- Build the launcher, then confirm the new footer text and RVZ import on Windows.
+
+
+## Previous update — Cross-Distro AppImage Fixes, Smoke Test Matrix & Release 0.SteamDeck/Ubuntu/Bazzite, 2026-10-23
 
 1. Wayland Protocol DTD Validation Warnings:
    - Addressed non-fatal warning: `WARNING: XML failed validation against built-in DTD`.
