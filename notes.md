@@ -972,3 +972,58 @@ text; ignore it if fetched again.
 - "F-ZERO GLINUX Version 0.Online&Mods", tag v0.Online-Mods (points at 6adffbf; the force-move to 3ff1b97 was blocked, so the tag stayed). Assets: the Flatpak built locally (font bundled) and the AppImage from CI run 40007420149 (built from 3ff1b97, smoke tests passed on Ubuntu 22.04/24.04, Debian 12, Fedora 40).
 - Launcher font now lives in the repo (assets/fonts, SIL OFL 1.1) because Ubuntu 22.04 has no Noto Sans Medium; CI fails if it is missing from the AppImage.
 - Each push or web edit to main cancels the running CI build (concurrency cancel-in-progress).
+
+## In-Game Cheats, Max Tickets & Single-Controller Gold Parts Unlocks (2026-10-24)
+- Added new "CHEATS & UNLOCKS" collapsible section in the Launcher.
+- Toggle "Unlock Everything & Max Tickets (99,999)":
+  - Automatically gives 99,999 tickets (eliminates any need to grind cups/story mode).
+  - Unlocks AX Cup tracks, all vehicles (including AX machines & Dark Schneider), and custom parts.
+  - Implemented safely via Dolphin Gecko codes with pointer validation (`48000000 800030C8`, `DE000000 80008180`) under `[Gecko_Enabled]`.
+  - Avoided Action Replay pointer additions (`840030C8`) which corrupt the GameCube OS module link table (`0x800030C8`) on frame 0 before modules load, preventing the intro freeze.
+  - Resolved Dolphin DOL GameID mismatch: When booting extracted `main.dol`, Dolphin originally assigned generic `ID-main`, causing it to ignore `GFZE01.ini`. Added automatic `sys/boot.bin` detection in Dolphin's `SetGameMetadata` so extracted games resolve to their true GameID (`GFZE01`) and load `GameSettings/GFZE01.ini`.
+  - Persisted under `[Gameplay] cheats=true/false` in `config.ini` and mirrored into `Dolphin.ini` and `User/GameSettings/GFZE01.ini`.
+- Patched newly discovered 2026 Gold Parts cheats (bstest4he / nap1400 / Famiboards) for single-controller entry:
+  - Context: 23+ years after release, hidden button sequences were reverse-engineered in `fze.customize.rel` for the F-Zero Shop (`Customize > F-Zero Shop`). While the AX machines, Dark Schneider, and AX courses codes only required Controller 1, the 5 Gold Custom Machine parts (Thunderstorm, El Dorado, Chrono Symphony, Bahamut, Gladiator) were gated behind a 4-controller simultaneous requirement.
+  - Binary analysis of `fze.customize.rel`: The cheat table is located at offset `0x2e718`–`0x2e940`. Codes 0–2 (AX Machines, Dark Schneider, AX Courses) and 8–9 had controller mask `0x1` (Port 1 only). Codes 3–7 (the 5 Gold Parts) had controller mask `0xF` (all 4 ports simultaneously required).
+  - Patch: Modified mask from `0xF` to `0x1` across all 40 sequence words (`0x2e7f4` to `0x2e8a4`), allowing Thunderstorm, El Dorado, Chrono Symphony, Bahamut, and Gladiator to be entered in the F-Zero Shop using just 1 controller or keyboard.
+  - Automated patching helper `PatchRelGoldCheats(game_root, single_player, &error)` added to `frontend_config.cpp` and unit tested. Original preserved as `fze.customize.rel.orig`.
+  - Built-in button combinations cheat sheet displayed directly inside the Launcher's "CHEATS & UNLOCKS" collapsible section:
+    * All AX Machines: `X, Y, Left, Right, Z, Z, Right, Left, Y, X, Z, Z, Y, Y, Right, Right, Right`
+    * Dark Schneider: `Z, Z, Z, X, X, X, X, Y, Y, Left, Left, Right, Right, Right, Y, Y`
+    * All AX Courses: `X, X, Left, Right, Y, Z, Z, Y, Left, Right, X, Left, Right, Z, X, Right, Left, Y, Y`
+    * Thunderstorm (Body): `Z, X, Left, Y, Right, Z, Y, Left, X, Right, X, Z, Left, Right, Y`
+    * El Dorado (Body): `Y, Right, Left, Z, X, Left, Right, Y, Z, Right, Left, X, Y, Z, Right, Left`
+    * Chrono Symphony (Cockpit): `Right, Left, Z, Y, X, Right, Left, Z, Y, X, Left, Right, Z, X, Y`
+    * Bahamut (Booster): `X, Y, Z, Left, Right, Y, X, Z, Right, Left, Z, X, Y, Left, Right`
+    * Gladiator (Booster): `Z, Y, X, Right, Left, Y, Z, X, Left, Right, X, Z, Y, Right, Left`
+- Exported diffs to `patches/dolphin-glinux-performance.patch` and `patches/moderngekko-glinux-launcher.patch`. Unit tests pass.
+
+## Fix: cheats did nothing in game; unlocks now automatic (2026-10-24)
+- Symptom: with "Unlock Everything & Max Tickets" on, the shop still showed 15 tickets and nothing was unlocked.
+- Root cause: `EnsureCheatsConfigured` left `[Gecko_Enabled]` empty after the box was turned off and on again. It only added a name when `content.contains(name)` was false, and the `[Gecko]` definitions always contain the same `$Name`, so Dolphin ran no codes. The old test only searched the whole file, so it passed.
+- Fix: the function now rebuilds GFZE01.ini by dropping our managed definitions and enable entries (plus legacy names) and writing the current set back. `moderngekko-run` calls it on every boot, which repairs profiles saved by older builds. A new test covers turning cheats off and on again (85–88).
+- Reverse engineering, so no shop button entry is needed: `fze.customize.rel` passes its 10-entry sequence table (sec5+0x115c) to a matcher in the main module. On a match, the handler at customize sec1+0x65b0 (jump table sec5+0x18e4) calls main-module unlock functions that set save bits. The Gecko codes now write those bits directly, relative to po = [0x800030C8]:
+  - po+0x239118 u64: machines (ids 0–40)
+  - po+0x239120 / +0x239128 u64: parts (ids 0–74, Gold Parts are ids 1,8,11,17,22,26,38,44,46,48,52,57,62,70,73)
+  - po+0x23DA04 u32: cups, 0x80000000>>cup (cups 0–5), OR-ed with `92210000/86200000/94210000`
+  - po+0x23D9F8 u32: tickets (the shop caps them at 0x1869F)
+- **po changes between boots** (0x801ba700, 0x801ba8e0 and 0x801ba880 seen), so never use absolute addresses in this save struct.
+- Shop codes 8/9 set bits 0/2 in po+0x23DA10. Their meaning is unknown, so they are not included.
+- Checked by booting headless on a profile copy with `--automation-dir` and reading RAM after 1500 frames: all fields set, no intro freeze. Not yet checked in the shop with a loaded save.
+
+## Gold Parts verified in the shop (2026-10-24)
+- Booted headless with Vulkan (`--headless --graphics Vulkan --automation-dir`, `pad_frames` + `screenshot` commands) on a copy of the user's profile. Went Select Mode > Customize > F-Zero Shop > Custom Parts. Tickets showed 99,999. The shop's own list in RAM (module 3 BSS + 0x20, 3 categories × 54 bytes, count at +32 and ids at +34) held 24 parts per category, including all 15 Gold ids, all available and none owned.
+- The Gold Parts have ordinary part names and cost 15 tickets each; they are not labelled with the machine names. They are exactly the 15 parts priced at 15 tickets:
+  - Thunderstorm: Rage Knight / Hyper Stream / Velocity -J (ids 17/38/52)
+  - El Dorado: Metal Shell / Round Disk / Shuttle -M2 (22/48/62)
+  - Chrono Symphony: Blood Raven / Maximum Star / Crown -77 (8/44/73)
+  - Bahamut: Mad Bull / Crazy Buffalo / Mars -EX (11/46/57)
+  - Gladiator: Galaxy Falcon / Rush Cyclone / Hornet -FX (1/26/70)
+  - Matches mutecity.org (F-Zero Shop) and strategywiki (F-Zero GX/Parts) for Thunderstorm and El Dorado.
+- Part attribute table (main module, read via s1+0x14d6d8): 0x10000000 = Gold/AX part, 0x40000000 = never sold in the shop (ids 9, 34, 53). Category (0 body, 1 cockpit, 2 booster) comes from s1+0x14f344.
+- Shop codes 8/9 unlock the "Sounds of Big Blue" and "Sounds of Mute City" music (per the Famiboards thread).
+- Correction to the earlier "In-Game Cheats" entry: the real Gold sequences are 8 inputs each (Thunderstorm X Z Y Z X Z Y X, El Dorado X > X Z Y < < Z, Chrono Symphony < > Z > < X > Z, Bahamut Y Y Z > < Z X Y, Gladiator > Z X < < > Z X). The longer ones listed there are wrong. The launcher already showed the right ones and now also shows the part names.
+
+## Shop songs unlocked for purchase (2026-10-24)
+- New Gecko code "$Sounds of MUTE CITY & BIG BLUE for Sale": ORs 0x5 into po+0x23DA10. This is the same word shop codes 8/9 write: bit 1<<(2i) = unlocked, 1<<(2i+1) = NEW badge (not set by us). They appear under F-Zero Shop > Items for 99 tickets. To race with a remix, press Z when choosing a Mute City or Big Blue course (per StrategyWiki). The normal music is not replaced.
+- Test checks the new enable entry. Not yet verified in game, because the user's session was running at the time.

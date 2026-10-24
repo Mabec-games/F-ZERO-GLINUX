@@ -45,7 +45,7 @@ index c0548a0..93ab90e 100644
      add_executable(moderngekko_launcher_savestates_test
          tests/launcher_savestates_test.cpp)
 diff --git a/include/moderngekko/runtime.hpp b/include/moderngekko/runtime.hpp
-index 0adc855..cfb5e4d 100644
+index 0adc855..0cf113f 100644
 --- a/include/moderngekko/runtime.hpp
 +++ b/include/moderngekko/runtime.hpp
 @@ -4,6 +4,7 @@
@@ -80,11 +80,27 @@ index 0adc855..cfb5e4d 100644
    std::filesystem::path game_root;
    std::filesystem::path user_directory;
    ModuleSource module;
+@@ -71,6 +82,7 @@ struct RuntimeConfig
+   bool fullscreen = false;
+   bool allow_interpreter = false;
+   bool show_fps_in_title = true;
++  bool enable_cheats = false;
+   std::optional<std::string> window_title;
+   // Boot straight into a savestate instead of from the title screen.
+   std::optional<std::filesystem::path> load_state_path;
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..3132d42 100644
+index f9b5405..fb2a63f 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
-@@ -13,6 +13,7 @@
+@@ -6,6 +6,7 @@
+ #include "Common/StringUtil.h"
+ #include "Core/Boot/Boot.h"
+ #include "Core/Boot/BootManager.h"
++#include "Core/Config/CheatSettings.h"
+ #include "Core/Config/GraphicsSettings.h"
+ #include "Core/Config/MainSettings.h"
+ #include "Core/Core.h"
+@@ -13,6 +14,7 @@
  #include "Core/HW/Memmap.h"
  #include "Core/Host.h"
  #include "Core/NetPlay/NetPlayClient.h"
@@ -92,7 +108,7 @@ index f9b5405..3132d42 100644
  #include "Core/PowerPC/JitInterface.h"
  #include "Core/PowerPC/PowerPC.h"
  #include "Core/PowerPC/StaticRecomp/StaticRecompModuleSource.h"
-@@ -55,6 +56,7 @@ bool s_runtime_active = false;
+@@ -55,6 +57,7 @@ bool s_runtime_active = false;
  Platform *s_platform = nullptr;
  std::string s_window_title;
  bool s_show_fps_in_title = true;
@@ -100,7 +116,7 @@ index f9b5405..3132d42 100644
  bool s_external_ui_common = false;
  std::unique_ptr<BootSessionData> s_boot_session_data;
  u64 s_previous_net_wait_ns = 0;
-@@ -113,10 +115,12 @@ PowerPC::CPUCore SelectCPUCore() {
+@@ -113,10 +116,12 @@ PowerPC::CPUCore SelectCPUCore() {
  std::vector<std::string> Host_GetPreferredLocales() { return {}; }
  void Host_PPCSymbolsChanged() {}
  void Host_PPCBreakpointsChanged() {}
@@ -114,7 +130,7 @@ index f9b5405..3132d42 100644
  }
  void Host_UpdateTitle(const std::string &) {
    if (!s_platform)
-@@ -514,6 +518,7 @@ struct Runtime::Impl {
+@@ -514,6 +519,7 @@ struct Runtime::Impl {
    RuntimeAutomationState automation_state;
    Common::EventHook present_hook;
    bool automation_registered = false;
@@ -122,7 +138,7 @@ index f9b5405..3132d42 100644
    std::jthread automation_thread;
  };
  
-@@ -569,7 +574,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -569,7 +575,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    else if (config.module.kind == ModuleSource::Kind::AttachedDescriptor)
      module_result =
          validation_library.Attach(config.module.descriptor, requirements);
@@ -131,7 +147,7 @@ index f9b5405..3132d42 100644
      return {
          {},
          RuntimeError{
-@@ -613,6 +618,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -613,6 +619,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
      impl->ui_initialized = true;
    }
    Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
@@ -143,7 +159,7 @@ index f9b5405..3132d42 100644
  
    if (impl->config.headless)
      impl->platform = Platform::CreateHeadlessPlatform();
-@@ -639,6 +649,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -639,6 +650,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
                           "the requested Dolphin host platform is unavailable"}};
    }
  
@@ -164,7 +180,15 @@ index f9b5405..3132d42 100644
    const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
    UICommon::InitControllers(wsi);
    impl->controllers_initialized = true;
-@@ -665,6 +689,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -658,6 +683,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+   impl->platform->SetTitle(impl->title);
+ 
+   Config::SetBase(Config::MAIN_CPU_CORE, SelectCPUCore());
++  Config::SetBase(Config::MAIN_ENABLE_CHEATS, impl->config.enable_cheats);
+   if (!impl->config.graphics.backend.empty())
+     Config::SetBase(Config::MAIN_GFX_BACKEND, impl->config.graphics.backend);
+   else if (impl->config.headless)
+@@ -665,6 +691,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    if (impl->config.graphics.internal_resolution_scale)
      Config::SetBase(Config::GFX_EFB_SCALE,
                      *impl->config.graphics.internal_resolution_scale);
@@ -189,7 +213,16 @@ index f9b5405..3132d42 100644
    Config::SetBase(Config::GFX_SHADER_CACHE, true);
    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                    ShaderCompilationMode::AsynchronousUberShaders);
-@@ -792,6 +834,12 @@ RuntimeRunResult Runtime::Run() {
+@@ -782,6 +826,8 @@ RuntimeRunResult Runtime::Run() {
+         if (state == Core::State::Uninitialized && m_impl->platform)
+           m_impl->platform->Stop();
+       });
++  std::fprintf(stderr, "[ModernGekko] Calling BootCore. main_dol: %s, boot index: %zu\n",
++               PathToString(m_impl->metadata.main_dol).c_str(), boot->parameters.index());
+   if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot),
+                              m_impl->platform->GetWindowSystemInfo())) {
+     m_impl->running = false;
+@@ -792,6 +838,12 @@ RuntimeRunResult Runtime::Run() {
    m_impl->booted = true;
    m_impl->present_hook =
        GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
@@ -203,7 +236,7 @@ index f9b5405..3132d42 100644
                                                     std::memory_order_relaxed);
          m_impl->automation_state.present_count.store(info.present_count,
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..f2ad6d4 100644
+index 6bb9e0e..0d1521f 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -21,6 +21,42 @@ int main() {
@@ -346,7 +379,7 @@ index 6bb9e0e..f2ad6d4 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +248,10 @@ int main() {
+@@ -138,6 +248,105 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -354,6 +387,101 @@ index 6bb9e0e..f2ad6d4 100644
 +  if (moderngekko::frontend::SetBoostLayout(directory, true, &error) ||
 +      read_profile() != custom) return 65;
 +#endif
++
++  auto cheats_cfg = netplay_config;
++  cheats_cfg.cheats = true;
++  if (!moderngekko::frontend::SaveConfig(directory, cheats_cfg, &error) ||
++      !moderngekko::frontend::LoadConfig(directory, false).cheats)
++    return 80;
++  {
++    std::ifstream in(directory / "Config" / "Dolphin.ini");
++    std::string dolphin_ini((std::istreambuf_iterator<char>(in)), {});
++    if (!dolphin_ini.contains("EnableCheats = True")) return 82;
++  }
++  {
++    std::ifstream in(directory / "GameSettings" / "GFZE01.ini");
++    std::string gfz_ini((std::istreambuf_iterator<char>(in)), {});
++    if (!gfz_ini.contains("$Max Tickets (99,999)") ||
++        !gfz_ini.contains("$All Custom Parts Unlocked (Gold Parts included)")) return 83;
++  }
++  cheats_cfg.cheats = false;
++  if (!moderngekko::frontend::SaveConfig(directory, cheats_cfg, &error) ||
++      moderngekko::frontend::LoadConfig(directory, false).cheats)
++    return 81;
++  {
++    std::ifstream in(directory / "Config" / "Dolphin.ini");
++    std::string dolphin_ini((std::istreambuf_iterator<char>(in)), {});
++    if (!dolphin_ini.contains("EnableCheats = False")) return 84;
++  }
++  const auto enabled_codes = [&] {
++    std::ifstream in(directory / "GameSettings" / "GFZE01.ini");
++    std::string gfz_ini((std::istreambuf_iterator<char>(in)), {});
++    const auto pos = gfz_ini.find("[Gecko_Enabled]\n");
++    if (pos == std::string::npos) return std::string{};
++    const auto end = gfz_ini.find('[', pos + 1);
++    return gfz_ini.substr(pos, end == std::string::npos ? end : end - pos);
++  };
++  if (enabled_codes().contains('$')) return 85;
++  // Turning cheats back on must list the codes again (regression: the code
++  // definitions contain the same names, which used to hide the missing list).
++  cheats_cfg.cheats = true;
++  if (!moderngekko::frontend::SaveConfig(directory, cheats_cfg, &error) ||
++      !moderngekko::frontend::SaveConfig(directory, cheats_cfg, &error))
++    return 86;
++  {
++    const std::string enabled = enabled_codes();
++    if (!enabled.contains("$Max Tickets (99,999)\n") ||
++        !enabled.contains("$All Machines Unlocked (AX + Dark Schneider)\n") ||
++        !enabled.contains("$All Custom Parts Unlocked (Gold Parts included)\n") ||
++        !enabled.contains("$All Cups Unlocked (AX Cup included)\n") ||
++        !enabled.contains("$Sounds of MUTE CITY & BIG BLUE for Sale\n"))
++      return 87;
++    std::ifstream in(directory / "GameSettings" / "GFZE01.ini");
++    std::string gfz_ini((std::istreambuf_iterator<char>(in)), {});
++    std::size_t defs = 0;
++    for (auto pos = gfz_ini.find("$Max Tickets"); pos != std::string::npos;
++         pos = gfz_ini.find("$Max Tickets", pos + 1))
++      ++defs;
++    if (defs != 2) return 88;  // one definition plus one enable entry
++  }
++
++  const auto fake_game = directory / "fake_game";
++  fs::create_directories(fake_game / "files");
++  std::vector<std::uint8_t> fake_rel(0x2e7f4 + 5 * 36 + 16, 0);
++  for (std::size_t i = 0; i < 5; ++i) {
++    for (std::size_t j = 0; j < 8; ++j) {
++      const std::size_t pos = 0x2e7f4 + i * 36 + j * 4;
++      fake_rel[pos] = 0x01;
++      fake_rel[pos + 3] = 0x2f;
++    }
++  }
++  {
++    std::ofstream out(fake_game / "files" / "fze.customize.rel", std::ios::binary);
++    out.write(reinterpret_cast<const char*>(fake_rel.data()), fake_rel.size());
++  }
++  if (!moderngekko::frontend::PatchRelGoldCheats(fake_game, true, &error)) return 90;
++  {
++    std::ifstream in(fake_game / "files" / "fze.customize.rel", std::ios::binary);
++    std::vector<std::uint8_t> read_rel((std::istreambuf_iterator<char>(in)), {});
++    for (std::size_t i = 0; i < 5; ++i) {
++      for (std::size_t j = 0; j < 8; ++j) {
++        const std::size_t pos = 0x2e7f4 + i * 36 + j * 4;
++        if (read_rel[pos + 3] != 0x21) return 91;
++      }
++    }
++  }
++  if (!moderngekko::frontend::PatchRelGoldCheats(fake_game, false, &error)) return 92;
++  {
++    std::ifstream in(fake_game / "files" / "fze.customize.rel", std::ios::binary);
++    std::vector<std::uint8_t> read_rel((std::istreambuf_iterator<char>(in)), {});
++    for (std::size_t i = 0; i < 5; ++i) {
++      for (std::size_t j = 0; j < 8; ++j) {
++        const std::size_t pos = 0x2e7f4 + i * 36 + j * 4;
++        if (read_rel[pos + 3] != 0x2f) return 93;
++      }
++    }
++  }
++
    fs::remove_all(directory);
    return 0;
  }
@@ -414,7 +542,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..3e926f4 100644
+index 03740d4..509c6f0 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -535,19 +663,21 @@ index 03740d4..3e926f4 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +204,11 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +204,13 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
-+    } else if (key == "custom_textures" || key == "graphics_mods") {
++    } else if (key == "custom_textures" || key == "graphics_mods" ||
++               key == "cheats") {
 +      bool &setting = key == "custom_textures" ? config.custom_textures
-+                                               : config.graphics_mods;
++                    : key == "graphics_mods"   ? config.graphics_mods
++                                               : config.cheats;
 +      if (!ParseBoolean(value, &setting))
 +        return {.error = key + " must be true or false"};
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +254,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +256,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -566,7 +696,7 @@ index 03740d4..3e926f4 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +287,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +289,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -594,7 +724,7 @@ index 03740d4..3e926f4 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +333,22 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,14 +335,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -615,10 +745,20 @@ index 03740d4..3e926f4 100644
 +       << "[Mods]\n"
 +       << "custom_textures=" << (config.custom_textures ? "true" : "false") << '\n'
 +       << "graphics_mods=" << (config.graphics_mods ? "true" : "false") << '\n'
++       << "[Gameplay]\n"
++       << "cheats=" << (config.cheats ? "true" : "false") << '\n'
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -336,6 +428,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -271,6 +367,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+        << "address=" << config.netplay_address << '\n'
+        << "port=" << config.netplay_port << '\n'
+        << "buffer=" << config.netplay_buffer << '\n';
++  EnsureCheatsConfigured(user_directory, config.cheats, nullptr);
+   return true;
+ }
+ 
+@@ -336,6 +433,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -674,7 +814,7 @@ index 03740d4..3e926f4 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +513,62 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +518,62 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -740,8 +880,237 @@ index 03740d4..3e926f4 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
+@@ -494,4 +675,228 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+   return EnsureControllerConfig(
+       user_directory, std::span<const std::string>(&value, 1), message);
+ }
++
++bool EnsureCheatsConfigured(const fs::path &user_directory, bool enabled,
++                            std::string *error) {
++  // 1. Update user Config/Dolphin.ini Core section EnableCheats
++  const fs::path dolphin_ini_path = user_directory / "Config" / "Dolphin.ini";
++  if (fs::exists(dolphin_ini_path)) {
++    std::ifstream in(dolphin_ini_path);
++    std::string content, line, section;
++    bool found_enable_cheats = false;
++    while (std::getline(in, line)) {
++      std::string trimmed = Trim(line);
++      if (trimmed.starts_with('[') && trimmed.ends_with(']')) {
++        if (section == "[Core]" && !found_enable_cheats) {
++          content += "EnableCheats = " + std::string(enabled ? "True" : "False") + "\n";
++          found_enable_cheats = true;
++        }
++        section = trimmed;
++      } else if (section == "[Core]" && trimmed.starts_with("EnableCheats")) {
++        line = "EnableCheats = " + std::string(enabled ? "True" : "False");
++        found_enable_cheats = true;
++      }
++      content += line + "\n";
++    }
++    if (section == "[Core]" && !found_enable_cheats) {
++      content += "EnableCheats = " + std::string(enabled ? "True" : "False") + "\n";
++    }
++    in.close();
++    std::ofstream out(dolphin_ini_path, std::ios::trunc);
++    out << content;
++  } else {
++    const fs::path config_dir = user_directory / "Config";
++    std::error_code dir_ec;
++    fs::create_directories(config_dir, dir_ec);
++    std::ofstream out(dolphin_ini_path, std::ios::trunc);
++    out << "[Core]\nEnableCheats = " << (enabled ? "True" : "False") << "\n";
++  }
++
++  // 2. Update user GameSettings/GFZE01.ini
++  const fs::path gamesettings_dir = user_directory / "GameSettings";
++  std::error_code ec;
++  fs::create_directories(gamesettings_dir, ec);
++  const fs::path gfz_ini_path = gamesettings_dir / "GFZE01.ini";
++
++  // Every code loads po from the OS module list head (0x800030C8, the main
++  // module's header; its address varies between boots), checks it, then writes
++  // the save fields the F-Zero Shop button cheats set, relative to po:
++  //   po+0x239118 u64  machines available in the shop (ids 0-40)
++  //   po+0x239120 u64  custom parts available, ids 0-63 (Gold Parts included)
++  //   po+0x239128 u64  custom parts available, ids 64-74
++  //   po+0x23DA04 u32  cups unlocked, bit 0x80000000 >> cup (cups 0-5), OR-ed
++  //   po+0x23DA10 u32  shop songs, 0x1 and 0x4 = Sounds of MUTE CITY / BIG BLUE
++  //   po+0x23D9F8 u32  tickets (the shop caps them at 99,999)
++  // No button sequence has to be entered in the shop.
++  constexpr std::string_view kGeckoDefs =
++      "$Max Tickets (99,999)\n"
++      "48000000 800030C8\n"
++      "DE000000 80008180\n"
++      "1423D9F8 0001869F\n"
++      "E0000000 80008000\n"
++      "$All Machines Unlocked (AX + Dark Schneider)\n"
++      "48000000 800030C8\n"
++      "DE000000 80008180\n"
++      "14239118 000001FF\n"
++      "1423911C FFFFFFFF\n"
++      "E0000000 80008000\n"
++      "$All Custom Parts Unlocked (Gold Parts included)\n"
++      "48000000 800030C8\n"
++      "DE000000 80008180\n"
++      "14239120 FFFFFFFF\n"
++      "14239124 FFFFFFFF\n"
++      "1423912C 000007FF\n"
++      "E0000000 80008000\n"
++      "$All Cups Unlocked (AX Cup included)\n"
++      "48000000 800030C8\n"
++      "DE000000 80008180\n"
++      "92210000 0023DA04\n"
++      "86200000 FC000000\n"
++      "94210000 0023DA04\n"
++      "E0000000 80008000\n"
++      "$Sounds of MUTE CITY & BIG BLUE for Sale\n"
++      "48000000 800030C8\n"
++      "DE000000 80008180\n"
++      "92210000 0023DA10\n"
++      "86200000 00000005\n"
++      "94210000 0023DA10\n"
++      "E0000000 80008000\n";
++  const std::vector<std::string> gecko_codes = {
++      "$Max Tickets (99,999)",
++      "$All Machines Unlocked (AX + Dark Schneider)",
++      "$All Custom Parts Unlocked (Gold Parts included)",
++      "$All Cups Unlocked (AX Cup included)",
++      "$Sounds of MUTE CITY & BIG BLUE for Sale"
++  };
++  // Names written by earlier launcher builds; dropped so they cannot linger.
++  const std::vector<std::string> legacy_codes = {
++      "$All Custom Parts Available",
++      "$Unlock AX Cup Tracks",
++      "$All Vehicles Unlocked"
++  };
++  const auto is_managed = [&](const std::string &name) {
++    return std::ranges::find(gecko_codes, name) != gecko_codes.end() ||
++           std::ranges::find(legacy_codes, name) != legacy_codes.end();
++  };
++  // Action Replay codes from earlier builds that freeze the intro screens.
++  const std::vector<std::string> dangerous_ar_codes = {
++      "$Max Tickets (99,999)",
++      "$Unlock AX Cup Tracks",
++      "$All Vehicles Unlocked",
++      "$All Custom Parts Available"
++  };
++
++  // Rebuild the file, dropping our code definitions and enable entries (the
++  // current set is written back below) and keeping everything else as is.
++  std::string content, line, section;
++  bool skipping_code = false;
++  if (fs::exists(gfz_ini_path)) {
++    std::ifstream in(gfz_ini_path);
++    while (std::getline(in, line)) {
++      const std::string trimmed = Trim(line);
++      if (trimmed.starts_with('[') && trimmed.ends_with(']')) {
++        section = trimmed;
++        skipping_code = false;
++      } else if (section == "[Gecko]") {
++        if (trimmed.starts_with('$')) skipping_code = is_managed(trimmed);
++        if (skipping_code) continue;
++      } else if (section == "[Gecko_Enabled]" && is_managed(trimmed)) {
++        continue;
++      } else if (section == "[ActionReplay_Enabled]" &&
++                 std::ranges::find(dangerous_ar_codes, trimmed) !=
++                     dangerous_ar_codes.end()) {
++        continue;
++      }
++      content += line + "\n";
++    }
++  }
++
++  const auto insert_after_header = [&](std::string_view header,
++                                       const std::string &text) {
++    const std::string header_line = std::string(header) + "\n";
++    const auto pos = content.starts_with(header_line)
++                         ? 0
++                         : content.find("\n" + header_line);
++    if (pos == std::string::npos) {
++      if (!content.empty() && !content.ends_with('\n')) content += '\n';
++      content += header_line + text;
++    } else {
++      content.insert(pos + (pos == 0 ? 0 : 1) + header_line.size(), text);
++    }
++  };
++  insert_after_header("[Gecko]", std::string(kGeckoDefs));
++  if (enabled) {
++    std::string names;
++    for (const auto &c : gecko_codes) names += c + "\n";
++    insert_after_header("[Gecko_Enabled]", names);
++  }
++
++  std::ofstream out(gfz_ini_path, std::ios::trunc);
++  out << content;
++  if (!out) {
++    if (error) *error = "cannot write " + gfz_ini_path.string();
++    return false;
++  }
++  return true;
++}
++
++bool PatchRelGoldCheats(const fs::path &game_root, bool single_player,
++                        std::string *error) {
++  const fs::path rel_path = game_root / "files" / "fze.customize.rel";
++  if (!fs::exists(rel_path))
++    return true;
++
++  std::ifstream in(rel_path, std::ios::binary);
++  if (!in) {
++    if (error) *error = "cannot open " + rel_path.string();
++    return false;
++  }
++  std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), {});
++  in.close();
++
++  constexpr std::size_t kTableStart = 0x2e7f4;
++  if (bytes.size() < kTableStart + 5 * 36) {
++    if (error) *error = "fze.customize.rel is too small";
++    return false;
++  }
++
++  bool changed = false;
++  for (std::size_t i = 0; i < 5; ++i) {
++    const std::size_t code_start = kTableStart + i * 36;
++    for (std::size_t j = 0; j < 8; ++j) {
++      const std::size_t pos = code_start + j * 4;
++      const std::uint32_t w = (static_cast<std::uint32_t>(bytes[pos]) << 24) |
++                              (static_cast<std::uint32_t>(bytes[pos + 1]) << 16) |
++                              (static_cast<std::uint32_t>(bytes[pos + 2]) << 8) |
++                              bytes[pos + 3];
++      if ((w >> 24) != 0x01) continue;
++      const std::uint8_t mask = bytes[pos + 3] & 0x0f;
++      if (single_player && mask == 0x0f) {
++        bytes[pos + 3] = (bytes[pos + 3] & 0xf0) | 0x01;
++        changed = true;
++      } else if (!single_player && mask == 0x01) {
++        bytes[pos + 3] = (bytes[pos + 3] & 0xf0) | 0x0f;
++        changed = true;
++      }
++    }
++  }
++
++  if (changed) {
++    const fs::path tmp = rel_path.string() + ".tmp";
++    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
++    if (!out) {
++      if (error) *error = "cannot write temporary " + tmp.string();
++      return false;
++    }
++    out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
++    out.close();
++    std::error_code rename_ec;
++    fs::rename(tmp, rel_path, rename_ec);
++    if (rename_ec) {
++      if (error) *error = "cannot replace fze.customize.rel: " + rename_ec.message();
++      return false;
++    }
++  }
++  return true;
++}
+ } // namespace moderngekko::frontend
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..84f3ed6 100644
+index 3b18d05..11cf821 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
 @@ -8,9 +8,18 @@
@@ -763,7 +1132,7 @@ index 3b18d05..84f3ed6 100644
  };
  
  struct GraphicsBackendOption {
-@@ -20,12 +29,22 @@ struct GraphicsBackendOption {
+@@ -20,12 +29,23 @@ struct GraphicsBackendOption {
  
  struct ConfigResult {
    int dolphin_scale = 0;
@@ -781,12 +1150,13 @@ index 3b18d05..84f3ed6 100644
    bool fullscreen = false;
 +  bool custom_textures = false;
 +  bool graphics_mods = false;
++  bool cheats = false;
 +  // Empty preserves the existing Dolphin setting.
 +  std::string aspect_ratio;
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -35,6 +54,12 @@ struct ConfigResult {
+@@ -35,6 +55,12 @@ struct ConfigResult {
    explicit operator bool() const { return error.empty(); }
  };
  
@@ -799,7 +1169,7 @@ index 3b18d05..84f3ed6 100644
  const std::vector<ResolutionOption> &SupportedResolutions();
  const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
-@@ -48,6 +73,8 @@ std::string
+@@ -48,6 +74,8 @@ std::string
  ReadConfiguredController(const std::filesystem::path &user_directory);
  std::vector<std::string>
  ReadConfiguredControllers(const std::filesystem::path &user_directory);
@@ -808,6 +1178,15 @@ index 3b18d05..84f3ed6 100644
  bool ControllerConfigExists(const std::filesystem::path &user_directory);
  bool GenerateControllerConfig(const std::filesystem::path &user_directory,
                                std::span<const std::string> controllers,
+@@ -60,4 +88,8 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+                             std::string *message);
+ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+                             std::string_view controller, std::string *message);
++bool EnsureCheatsConfigured(const std::filesystem::path &user_directory,
++                            bool enabled, std::string *error);
++bool PatchRelGoldCheats(const std::filesystem::path &game_root,
++                        bool single_player, std::string *error);
+ } // namespace moderngekko::frontend
 diff --git a/tools/graphics_mods.cpp b/tools/graphics_mods.cpp
 new file mode 100644
 index 0000000..b89c5f2
@@ -1262,7 +1641,7 @@ index 0000000..99e2fc5
 +}
 +} // namespace moderngekko::frontend
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..4d3adb1 100644
+index 7699c3d..577b5d8 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,9 +1,13 @@
@@ -1329,7 +1708,15 @@ index 7699c3d..4d3adb1 100644
    return std::nullopt;
  #endif
  }
-@@ -498,12 +526,132 @@ fs::path SiblingRunner(const char* argv0)
+@@ -464,6 +492,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+   fs::rename(staging, output, ec);
+   if (ec)
+     return fail("can't publish extracted game: " + ec.message());
++  moderngekko::frontend::PatchRelGoldCheats(output, true, nullptr);
+   std::string error;
+   if (!WriteDefaultGame(user_directory, release_directory, output, &error))
+     return fail(error);
+@@ -498,12 +527,132 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -1462,7 +1849,7 @@ index 7699c3d..4d3adb1 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +660,23 @@ int main(int argc, char** argv)
+@@ -512,9 +661,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -1487,7 +1874,7 @@ index 7699c3d..4d3adb1 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +692,12 @@ int main(int argc, char** argv)
+@@ -530,6 +693,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -1500,7 +1887,7 @@ index 7699c3d..4d3adb1 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -547,7 +715,7 @@ int main(int argc, char** argv)
+@@ -547,7 +716,7 @@ int main(int argc, char** argv)
      return 1;
  
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -1509,7 +1896,7 @@ index 7699c3d..4d3adb1 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,6 +724,11 @@ int main(int argc, char** argv)
+@@ -556,6 +725,11 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -1521,7 +1908,7 @@ index 7699c3d..4d3adb1 100644
    SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
    if (!renderer)
      renderer = SDL_CreateRenderer(window, nullptr);
-@@ -571,14 +744,23 @@ int main(int argc, char** argv)
+@@ -571,17 +745,27 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
@@ -1546,7 +1933,11 @@ index 7699c3d..4d3adb1 100644
    std::vector<fs::path> images = FindDiscImages();
    std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
    fs::path current_game = ReadDefaultGame(user_directory, release_directory);
-@@ -600,8 +782,20 @@ int main(int argc, char** argv)
++  moderngekko::frontend::PatchRelGoldCheats(current_game, true, nullptr);
+   bool current_dol_changed = false;
+   std::string current_dol_error;
+   auto current_metadata =
+@@ -600,8 +784,20 @@ int main(int argc, char** argv)
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
                  config.netplay_nickname.c_str());
@@ -1569,7 +1960,7 @@ index 7699c3d..4d3adb1 100644
    int netplay_port = config.netplay_port;
    bool automatic_buffer = config.netplay_buffer == "auto";
    int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
-@@ -631,6 +825,10 @@ int main(int argc, char** argv)
+@@ -631,6 +827,10 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
@@ -1580,7 +1971,7 @@ index 7699c3d..4d3adb1 100644
    DialogState dialog;
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -683,15 +881,16 @@ int main(int argc, char** argv)
+@@ -683,15 +883,16 @@ int main(int argc, char** argv)
        }
        selected_controller = configured_controllers.front();
        controller_index = FindController(controllers, selected_controller);
@@ -1602,7 +1993,7 @@ index 7699c3d..4d3adb1 100644
      return select_controller(controller_index);
    };
    const auto refresh_controllers = [&]
-@@ -774,14 +973,18 @@ int main(int argc, char** argv)
+@@ -774,14 +975,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1624,7 +2015,7 @@ index 7699c3d..4d3adb1 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1023,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1025,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -1634,7 +2025,7 @@ index 7699c3d..4d3adb1 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1032,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1034,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -1697,7 +2088,7 @@ index 7699c3d..4d3adb1 100644
      }
      else
      {
-@@ -891,6 +1039,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1041,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -1705,7 +2096,7 @@ index 7699c3d..4d3adb1 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1089,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1091,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -1740,7 +2131,7 @@ index 7699c3d..4d3adb1 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1148,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1150,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -1776,7 +2167,7 @@ index 7699c3d..4d3adb1 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -1005,6 +1201,8 @@ int main(int argc, char** argv)
+@@ -1005,6 +1203,8 @@ int main(int argc, char** argv)
        }
        ImGui::EndCombo();
      }
@@ -1785,7 +2176,7 @@ index 7699c3d..4d3adb1 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,39 +1210,325 @@ int main(int argc, char** argv)
+@@ -1012,39 +1212,360 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -1819,9 +2210,9 @@ index 7699c3d..4d3adb1 100644
 +        std::lock_guard lock(dialog.mutex);
 +        dialog.error = std::move(error);
 +      }
-     }
++    }
 +    ImGui::TextWrapped("Xbox-style layout: A accelerates, X boosts, Y takes the original X action. Sticks and triggers are preserved.");
-     ImGui::Spacing();
++    ImGui::Spacing();
 +    }
 +    const std::string game_id =
 +        current_metadata ? current_metadata.metadata->disc_id : std::string();
@@ -1964,6 +2355,41 @@ index 7699c3d..4d3adb1 100644
 +    }
 +    ImGui::Spacing();
 +    }
++    if (ImGui::CollapsingHeader("CHEATS & UNLOCKS")) {
++      bool cheats = config.cheats;
++      if (ImGui::Checkbox("Unlock Everything & Max Tickets (99,999)", &cheats)) {
++        config.cheats = cheats;
++        std::string error;
++        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error)) {
++          config.cheats = !cheats;
++          std::lock_guard lock(dialog.mutex);
++          dialog.error = std::move(error);
++        }
++      }
++      ImGui::TextWrapped("Applied automatically when the game starts, no button codes needed: 99,999 tickets, all cups including the AX Cup, every machine including the AX machines and Dark Schneider, and every custom part including the 15 Gold Parts, and the Sounds of MUTE CITY and Sounds of BIG BLUE songs (F-Zero Shop > Items, 99 tickets; press Z when choosing a Mute City or Big Blue course to race with the remix). Buy the parts in the F-Zero Shop > Custom Parts, where they cost 15 tickets each and use their part names (Rage Knight, Hyper Stream, Velocity -J and so on, listed below), not the machine names.");
++      ImGui::Spacing();
++
++      ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Optional: entering the codes by hand");
++      ImGui::TextWrapped("The newly discovered 2026 Gold Parts cheats (Thunderstorm, El Dorado, Chrono Symphony, Bahamut, Gladiator) are patched to work with a single controller (bypassing the 4-controller requirement).");
++      ImGui::Spacing();
++
++      if (ImGui::TreeNode("View In-Game Button Cheats (F-Zero Shop)")) {
++        ImGui::TextWrapped("Enter these button sequences in Customize > F-Zero Shop:");
++        ImGui::Spacing();
++        ImGui::BulletText("All AX Machines:\n  X, Y, Left, Right, Z, Z, Right, Left, Y, X, Z, Z, Y, Y, Right, Right, Right");
++        ImGui::BulletText("All AX Courses:\n  X, X, Left, Right, Y, Z, Z, Y, Left, Right, X, Left, Right, Z, X, Right, Left, Y, Y");
++        ImGui::BulletText("Dark Schneider:\n  Z, Z, Z, X, X, X, X, Y, Y, Left, Left, Right, Right, Right, Y, Y");
++        ImGui::Separator();
++        ImGui::TextDisabled("Gold Custom Parts (single controller enabled):");
++        ImGui::BulletText("Thunderstorm Parts (Rage Knight, Hyper Stream, Velocity -J):\n  X, Z, Y, Z, X, Z, Y, X");
++        ImGui::BulletText("El Dorado Parts (Metal Shell, Round Disk, Shuttle -M2):\n  X, Right, X, Z, Y, Left, Left, Z");
++        ImGui::BulletText("Chrono Symphony Parts (Blood Raven, Maximum Star, Crown -77):\n  Left, Right, Z, Right, Left, X, Right, Z");
++        ImGui::BulletText("Bahamut Parts (Mad Bull, Crazy Buffalo, Mars -EX):\n  Y, Y, Z, Right, Left, Z, X, Y");
++        ImGui::BulletText("Gladiator Parts (Galaxy Falcon, Rush Cyclone, Hornet -FX):\n  Right, Z, X, Left, Left, Right, Z, X");
++        ImGui::TreePop();
++      }
++      ImGui::Spacing();
++    }
 +    if (ImGui::CollapsingHeader("PLAY ONLINE")) {
 +    // Saves the online fields with the rest of the settings, then hands over
 +    // to the netplay lobby in the chosen role.
@@ -2052,9 +2478,9 @@ index 7699c3d..4d3adb1 100644
 +      }
 +      HintText("A bigger buffer smooths out lag spikes but adds input delay.");
 +      ImGui::TreePop();
-+    }
+     }
 +    ImGui::EndDisabled();
-+    ImGui::Spacing();
+     ImGui::Spacing();
 +    }
      ImGui::TextUnformatted("Game disc image");
      if (selected_image)
@@ -2135,7 +2561,7 @@ index 7699c3d..4d3adb1 100644
        }
        if (selected_image)
        {
-@@ -1090,16 +1574,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1611,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -2207,7 +2633,7 @@ index 7699c3d..4d3adb1 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1657,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1694,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -2218,7 +2644,7 @@ index 7699c3d..4d3adb1 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1201,9 +1744,29 @@ int main(int argc, char** argv)
+@@ -1201,9 +1781,29 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -2250,7 +2676,7 @@ index 7699c3d..4d3adb1 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +1802,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +1839,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -2273,7 +2699,7 @@ index 7699c3d..4d3adb1 100644
            }
            else
            {
-@@ -1266,6 +1832,8 @@ int main(int argc, char** argv)
+@@ -1266,6 +1869,8 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
@@ -2283,7 +2709,7 @@ index 7699c3d..4d3adb1 100644
    SDL_DestroyWindow(window);
    SDL_Quit();
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..ce92316 100644
+index d6b3569..430d4ff 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -6,6 +6,7 @@
@@ -2294,7 +2720,15 @@ index d6b3569..ce92316 100644
  
  #include <charconv>
  #include <chrono>
-@@ -191,6 +192,8 @@ int RunMain(int argc, char **argv) {
+@@ -148,6 +149,7 @@ int RunMain(int argc, char **argv) {
+   std::string netplay_nickname;
+   std::string netplay_buffer;
+   std::vector<std::string> netplay_controllers;
++  std::optional<bool> cli_cheats;
+   for (int i = 1; i < argc; ++i) {
+     const std::string arg = argv[i];
+     const auto value = [&](const char *option) -> const char * {
+@@ -191,6 +193,8 @@ int RunMain(int argc, char **argv) {
        config.window_system = moderngekko::WindowSystem::Wayland;
      else if (arg == "--mute")
        config.audio.mute = true;
@@ -2303,7 +2737,18 @@ index d6b3569..ce92316 100644
      else if (arg == "--automation-dir")
        config.automation.directory = value("--automation-dir");
      else if (arg == "--headless")
-@@ -246,6 +249,14 @@ int RunMain(int argc, char **argv) {
+@@ -220,6 +224,10 @@ int RunMain(int argc, char **argv) {
+       netplay_buffer = value("--buffer");
+     else if (arg == "--controller")
+       netplay_controllers.emplace_back(value("--controller"));
++    else if (arg == "--cheats")
++      cli_cheats = true;
++    else if (arg == "--no-cheats")
++      cli_cheats = false;
+     else if (arg == "--help" || arg == "-h") {
+       Usage();
+       return 0;
+@@ -246,6 +254,14 @@ int RunMain(int argc, char **argv) {
      return 2;
    }
    config.graphics.internal_resolution_scale = frontend_config.dolphin_scale;
@@ -2318,10 +2763,17 @@ index d6b3569..ce92316 100644
    if (config.graphics.backend.empty())
      config.graphics.backend = frontend_config.graphics_backend;
    config.fullscreen = frontend_config.fullscreen;
-@@ -338,6 +349,20 @@ int RunMain(int argc, char **argv) {
+@@ -338,6 +354,27 @@ int RunMain(int argc, char **argv) {
      config.graphics.backend = "Vulkan";
  #endif
  
++  config.enable_cheats = cli_cheats.value_or(frontend_config.cheats);
++  // Rewrite the Gecko list every boot so profiles saved by older builds pick
++  // up the current codes.
++  moderngekko::frontend::EnsureCheatsConfigured(config.user_directory,
++                                                config.enable_cheats, nullptr);
++  moderngekko::frontend::PatchRelGoldCheats(config.game_root, true, nullptr);
++
 +  if (!config.headless) {
 +    config.confirm_exit = [executable_directory](bool online) {
 +      // A separate process keeps Dolphin's SDL input event thread from consuming

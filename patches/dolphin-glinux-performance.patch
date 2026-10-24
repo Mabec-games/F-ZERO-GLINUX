@@ -1,5 +1,5 @@
 diff --git a/Data/Sys/GameSettings/GFZE01.ini b/Data/Sys/GameSettings/GFZE01.ini
-index 6d5afdc..d180c81 100644
+index 6d5afdc..cef4db0 100644
 --- a/Data/Sys/GameSettings/GFZE01.ini
 +++ b/Data/Sys/GameSettings/GFZE01.ini
 @@ -2,6 +2,11 @@
@@ -14,6 +14,37 @@ index 6d5afdc..d180c81 100644
  
  [ActionReplay]
  # Add action replay cheats here.
+@@ -28,8 +33,28 @@ $All Vehicles Unlocked
+ 420030C8 0002FFFF
+ 420030C8 0003FFFF
+ 840030C8 FFDC6F00
+-
+-[Gecko]
++$Max Tickets (99,999)
++48000000 800030C8
++DE000000 80008180
++1223D9F8 00000001
++1223D9FA 0000869F
++E0000000 80008000
++$All Custom Parts Available
++48000000 800030C8
++DE000000 80008180
++14239120 0007FFFF
++E0000000 80008000
++$Unlock AX Cup Tracks
++48000000 800030C8
++DE000000 80008180
++140FA1F4 3880FFFF
++140FA1AC 3880FFFF
++E0000000 80008000
++$All Vehicles Unlocked
++48000000 800030C8
++DE000000 80008180
++140F7D10 38600001
++E0000000 80008000
+ $Activate AX Mode (Version 8) [Ralf]
+ 06003F30 00000284
+ 818D831C 280C0000
 diff --git a/Source/Core/Common/FileSearch.cpp b/Source/Core/Common/FileSearch.cpp
 index 9aed337..c5b26d6 100644
 --- a/Source/Core/Common/FileSearch.cpp
@@ -30,6 +61,32 @@ index 9aed337..c5b26d6 100644
               it != fs::recursive_directory_iterator(); it.increment(error))
            add_filtered(*it);
        }
+diff --git a/Source/Core/Core/Config/ConfigManager.cpp b/Source/Core/Core/Config/ConfigManager.cpp
+index c121351..7f31cde 100644
+--- a/Source/Core/Core/Config/ConfigManager.cpp
++++ b/Source/Core/Core/Config/ConfigManager.cpp
+@@ -357,7 +357,20 @@ struct SetGameMetadata
+     constexpr char BACKSLASH = '\\';
+     constexpr char FORWARDSLASH = '/';
+     std::ranges::replace(executable_path, BACKSLASH, FORWARDSLASH);
+-    config->SetRunningGameMetadata(SConfig::MakeGameID(PathToFileName(executable_path)));
++    std::string game_id = SConfig::MakeGameID(PathToFileName(executable_path));
++    const auto dir = StringToPath(executable_path).parent_path();
++    const auto boot_bin = dir / "boot.bin";
++    if (File::Exists(PathToString(boot_bin)))
++    {
++      std::string boot_data;
++      if (File::ReadFileToString(PathToString(boot_bin), boot_data) && boot_data.size() >= 6)
++      {
++        std::string disc_id = boot_data.substr(0, 6);
++        if (std::ranges::all_of(disc_id, [](char c) { return std::isalnum(static_cast<unsigned char>(c)); }))
++          game_id = disc_id;
++      }
++    }
++    config->SetRunningGameMetadata(game_id);
+ 
+     Host_TitleChanged();
+ 
 diff --git a/Source/Core/Core/Host.h b/Source/Core/Core/Host.h
 index 5763950..f08e7bc 100644
 --- a/Source/Core/Core/Host.h
