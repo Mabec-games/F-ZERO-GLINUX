@@ -56,6 +56,7 @@ $zip = "$root\dist\$name.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path $stage -DestinationPath $zip
 $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-"$hash  $name.zip" | Set-Content -Encoding ascii "$zip.sha256"
+# LF only: with CRLF, `sha256sum -c` on Linux looks for a file name ending in \r.
+[IO.File]::WriteAllText("$zip.sha256", "$hash  $name.zip`n")
 Write-Host "Package: $zip"
 Write-Host "SHA-256: $hash"
