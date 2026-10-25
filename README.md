@@ -3,9 +3,9 @@
 </p>
 
 <h1 align="center">F-ZERO GLINUX</h1>
-<p align="center"><strong>Choose your machine. Set your resolution. Hit the track.</strong><br>F-ZERO GX on Linux, with a controller-friendly launcher.</p>
+<p align="center"><strong>Choose your machine. Set your resolution. Hit the track.</strong><br>F-ZERO GX on Linux and Windows, with a controller-friendly launcher.</p>
 <p align="center">
-  <a href="#choose-your-package">AppImage & Flatpak</a> ·
+  <a href="#choose-your-package">AppImage, Flatpak & Windows</a> ·
   <a href="#start-playing">Start playing</a> ·
   <a href="#mods--hd-textures">Mods</a> ·
   <a href="#play-online">Play online</a> ·
@@ -98,6 +98,9 @@ multiplayer:
 The two packages keep separate profiles. Switching package formats does not
 automatically transfer your saves.
 
+**Windows** (10/11, x64) uses a portable zip: unpack it anywhere and run it, no
+installer or extra runtime needed. Saves are stored in `%LOCALAPPDATA%zero-glinux`.
+
 ## Start playing
 
 The filenames below refer to the current preview artifacts. When building locally,
@@ -136,6 +139,16 @@ the runtime source if needed:
 ```bash
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 ```
+
+### Windows
+
+1. Download `F-ZERO-GLINUX-preview-20261025-windows-x64.zip` and unpack it to any folder.
+2. Run `F-ZERO GLINUX.exe`. If SmartScreen warns about an unknown publisher,
+   choose **More info → Run anyway**; the preview is not code-signed.
+
+Direct3D 11 is the default graphics backend; Vulkan and Direct3D 12 are available
+in the launcher. The first start of the game compiles shaders and can take a few
+minutes on slower GPUs; later starts are fast.
 
 ### First launch
 
@@ -186,7 +199,7 @@ See the [AppImage build guide](packaging/README.md) and
 [upstream template's dependency notes](docs/UPSTREAM-TEMPLATE.md). Building on a
 newer host can raise the resulting AppImage's minimum system requirements.
 
-**Windows (experimental):** install Visual Studio 2022 Build Tools with
+**Windows:** install Visual Studio 2022 Build Tools with
 "Desktop development with C++", CMake and Ninja. Clone to a short path such as
 `C:\dev`: the nested submodules exceed Windows' 260-character path limit in deep
 folders. Then, in PowerShell:
@@ -211,7 +224,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Static recompilation | Experimental; performance work remains |
 | Native widescreen | In-game setting; remembered in the player's save |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
-| Windows | Experimental: builds with MSVC; launcher, import and game boot work. Gamepads and races not yet tested |
+| Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
 | Mods | HD texture packs and Dolphin graphics mods from any folder |
 
