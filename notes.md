@@ -27,6 +27,21 @@ User-confirmed on Windows before this: launcher, gamepad and audio work; Direct3
 - CI: on `v*` tags the AppImage is now named after the tag (`GLINUX_VERSION=${GITHUB_REF_NAME#v}`).
 - Flatpak check: `flatpak build --runtime --env=MODERNGEKKO_STATICRECOMP=0` on `build/flatpak/app`, headless Null boot on a profile copy with cheats on, RAM read after 1500 frames: po=0x801ba860, tickets 99999, cups 0xfc000000, machines 0x1ff/0xffffffff, parts 0xffffffff/0xffffffff/0x7ff, songs 0x5, exit 0. The songs bit is set in RAM, and the user confirmed both songs appear in F-Zero Shop > Items on the Windows build with cheats on.
 - README: new "Unlock everything" section, 0.9 filenames, AppImage glibc 2.35 wording, fixed the `%LOCALAPPDATA%\fzero-glinux` path.
+- CI: tag run 40168758925 and main run 40168879596 passed (build + Ubuntu 22.04/24.04, Debian 12, Fedora 40 smoke tests). The release job created the release; title, notes, Flatpak and Windows zip were added with `gh release edit` / `gh release upload`.
+- Release page edits after publishing:
+  - Added "Where are Thunderstorm, El Dorado, Bahamut, Chrono Symphony and Gladiator?": they are machine names from Japanese events, the shop sells their three parts under ordinary names at 15 tickets, build them in Customize > Garage.
+  - "Escape opens the Quit dialog" is struck through for Windows: on the user's PC Escape did not open it, although the overnight synthetic-key test passed. Not investigated yet (suspects: window focus, the Dolphin Win32 menu bar, fullscreen handling).
+  - The shop songs were confirmed by the user on the Windows build (F-Zero Shop > Items) and the "not checked" caveat was removed.
+- Release notes source: Claude's scratchpad `release-notes-0.9.md` (temporary); the published text on the release page is the reference.
+
+### Open items after 0.9
+- Windows: Escape does not open the Quit dialog on the user's PC (real keyboard). Online play still untested on Windows (gamepad and audio confirmed). Hide or keep the Dolphin File/View menu bar.
+- The public v0.9 Windows zip now contains the fullscreen/drives/UTF-8 fixes (c4554da..368d814), but that code is only in `dev`; the public repo's main is at d11cbb8. Push to `glinux` only when the user asks.
+- The release text on GitHub was edited from both machines (Windows added a fix note at the top). Always start from `gh release view v0.9 --json body`, never from an old local copy.
+- README "Unlock everything" could get the machine-names explanation from the release page (user not asked yet).
+- GitHub About text still describes the Linux-only previews; suggested new description given to the user, not applied.
+- The private `dev` repo runs the same CI on every push (private Actions minutes); consider disabling it there.
+- Windows CI job (windows-latest + build-windows.ps1 + package-windows.ps1) so the zip is built by CI instead of by hand.
 
 
 ## Previous update — First Windows Build: Launcher, Import and Game Boot Working, 2026-10-25 (overnight)
