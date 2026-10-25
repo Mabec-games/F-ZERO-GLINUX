@@ -262,7 +262,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
 | Mods | HD texture packs and Dolphin graphics mods from any folder |
-| Unlockables | Automatic; tickets, cups, machines and Gold Parts confirmed in game, shop songs not yet checked |
+| Unlockables | Automatic; tickets, cups, machines, Gold Parts and shop songs confirmed in game |
 
 Report problems with your package type, distro, graphics backend, GPU and gamepad,
 along with the relevant log. 
