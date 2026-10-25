@@ -33,10 +33,12 @@ Test PC: Intel Pentium Silver J5040 (4 cores, Intel UHD 605), Windows 11, VS 202
    - End-to-end on Windows verified: launcher -> PLAY -> game (43-47 FPS in menus) -> Escape -> Right+Enter (Yes) -> runner exits 0 -> launcher closes (by design it only reappears on errors, same as Linux).
    - Test note: PowerShell `SendKeys` arrows lack the extended-key flag, so SDL sees keypad keys; use `keybd_event` with `KEYEVENTF_EXTENDEDKEY` for synthetic arrow tests.
 
+   - App icon: `scripts/make-windows-icon.py` (stdlib only) renders `packaging/fzero-glinux.svg` (the AppImage/Flatpak icon) into `packaging/windows/fzero-glinux.ico` (16-256 px). New CMake option `MODERNGEKKO_WINDOWS_ICON` embeds it as resource 101 in the launcher and runner; `build-windows.ps1` passes it. `PlatformWin32` loaded `IDI_ICON1` with a null module, i.e. system icon 101 = the warning triangle; it now loads from the exe. SDL windows (launcher, quit dialog) pick up the first icon resource by themselves. Verified in the title bar and taskbar.
+
 4. Packaging: `scripts/package-windows.ps1 [-Version x]` stages `build\windows-package\F-ZERO-GLINUX-<ver>-windows-x64\` and writes `dist\<name>.zip` + `.sha256` (23.6 MB). Contents: `F-ZERO GLINUX.exe` (copy of the launcher for players), `ModernGekko.exe` + `moderngekko-run.exe` (names the launcher/runner start each other by), `Sys\`, `Assets\` (artwork + Noto fonts), `licenses\` (ModernGekko, Dolphin, Noto OFL), README.txt, and app-local VC++ runtime DLLs (msvcp140, msvcp140_atomic_wait, vcruntime140, vcruntime140_1 from the Build Tools redist; `dumpbin /dependents` shows no other non-system DLLs). Verified: extracted to a path with spaces, `F-ZERO GLINUX.exe` -> PLAY -> game -> Escape -> Yes -> exit 0. Not tested on a PC without the VC++ redistributable. Not published; `dist/` is git-ignored.
 
 5. Known Windows gaps / next steps:
-   - Game window title-bar icon is the default warning triangle and the Dolphin Win32 window shows a File/View menu bar; no app icon/resource yet.
+   - The Dolphin Win32 game window shows a File/View menu bar (save/load state, pause, mute, fullscreen). Kept; hide it if it looks out of place.
    - Physical gamepad, audio (cubeb/WASAPI), fullscreen, D3D11/D3D12 backends and netplay untested on Windows. Default backend is Vulkan (`moderngekko_run.cpp`); consider D3D11 as the Windows default for weak/odd GPUs.
    - Packaging: maybe an installer; a Windows CI job (GitHub Actions windows-latest + build-windows.ps1 + package-windows.ps1).
    - The lib/ModernGekko nested submodules libusb, miniupnp and zstd show as dirty: symlinks/line endings mangled by the USB copy. Harmless for building; ignore (`--ignore-submodules` when exporting patches).

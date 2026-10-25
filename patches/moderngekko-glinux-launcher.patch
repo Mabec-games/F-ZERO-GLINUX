@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c0548a0..67b9118 100644
+index c0548a0..409ea43 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -46,6 +46,8 @@ option(MODERNGEKKO_PORTABLE_DEFAULT_GAME
+@@ -46,10 +46,14 @@ option(MODERNGEKKO_PORTABLE_DEFAULT_GAME
         "Read and write default-game.txt beside branded executables" OFF)
  option(MODERNGEKKO_GAMECUBE_CONTROLLERS
         "Generate GameCube controller profiles instead of Wii Remote profiles" OFF)
@@ -11,7 +11,13 @@ index c0548a0..67b9118 100644
  set(MODERNGEKKO_LOG_FILENAME "ModernGekko.log" CACHE STRING
      "Runner log filename")
  set(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME "" CACHE STRING
-@@ -245,6 +247,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+     "Optional adjacent disc preparation executable")
++set(MODERNGEKKO_WINDOWS_ICON "" CACHE FILEPATH
++    "Optional .ico embedded in the Windows launcher and runner")
+ set(MODERNGEKKO_DOL_PATCH_MANIFEST "" CACHE FILEPATH
+     "Optional expected-word DOL patch manifest bundled with the frontend")
+ set(MODERNGEKKO_GAME_SETTINGS_OVERRIDE "" CACHE FILEPATH
+@@ -245,6 +249,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
          vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
          vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
      )
@@ -21,7 +27,7 @@ index c0548a0..67b9118 100644
      if(NOT ANDROID)
          target_sources(moderngekko PRIVATE
              vendor/dolphin/Source/Core/InputCommon/ControllerInterface/Touch/InputOverrider.cpp)
-@@ -417,6 +422,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+@@ -417,6 +424,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
          tools/moderngekko_run.cpp
          tools/netplay_compatibility.cpp
          tools/netplay_session.cpp
@@ -29,7 +35,7 @@ index c0548a0..67b9118 100644
          tools/frontend_config.cpp
          tools/dol_patch.cpp
          vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
-@@ -515,14 +521,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+@@ -515,14 +523,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
  
      add_executable(moderngekko-launcher
          tools/moderngekko_launcher.cpp
@@ -48,7 +54,27 @@ index c0548a0..67b9118 100644
      # The launcher only calls the game-inspection surface directly, but the
      # Dolphin static libraries still require the Host_* callbacks implemented
      # in the runtime object. Keep that object from being discarded by the
-@@ -671,6 +680,14 @@ if(BUILD_TESTING)
+@@ -652,6 +663,19 @@ if(WIN32)
+             endif()
+         endif()
+     endforeach()
++    if(MODERNGEKKO_WINDOWS_ICON)
++        # Resource 101 is the IDI_ICON1 Dolphin's Win32 platform loads for the game
++        # window; Explorer and the taskbar use an executable's first icon.
++        file(TO_CMAKE_PATH "${MODERNGEKKO_WINDOWS_ICON}" _moderngekko_icon)
++        file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/moderngekko_icon.rc"
++            CONTENT "101 ICON \"@_moderngekko_icon@\"\n" @ONLY)
++        foreach(_moderngekko_icon_target moderngekko-launcher moderngekko-run)
++            if(TARGET ${_moderngekko_icon_target})
++                target_sources(${_moderngekko_icon_target} PRIVATE
++                    "${CMAKE_CURRENT_BINARY_DIR}/moderngekko_icon.rc")
++            endif()
++        endforeach()
++    endif()
+ endif()
+ 
+ if(BUILD_TESTING)
+@@ -671,6 +695,14 @@ if(BUILD_TESTING)
      target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
      add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
  

@@ -384,7 +384,7 @@ index f7e1ca2..2ae49aa 100644
    else if (symbol == XKB_KEY_F10)
    {
 diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
-index 3402fda..67830dd 100644
+index 3402fda..977ab19 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 @@ -90,7 +90,13 @@ private:
@@ -401,7 +401,24 @@ index 3402fda..67830dd 100644
  }
  
  bool PlatformWin32::RegisterRenderWindowClass()
-@@ -381,14 +387,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -102,12 +108,14 @@ bool PlatformWin32::RegisterRenderWindowClass()
+   wc.cbClsExtra = 0;
+   wc.cbWndExtra = 0;
+   wc.hInstance = GetModuleHandle(nullptr);
+-  wc.hIcon = LoadIcon(nullptr, IDI_ICON1);
++  // From this executable's resources: with a null module LoadIcon only finds
++  // system icons, and ID 101 there is the warning triangle.
++  wc.hIcon = LoadIcon(GetModuleHandle(nullptr), IDI_ICON1);
+   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+   wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+   wc.lpszMenuName = nullptr;
+   wc.lpszClassName = WINDOW_CLASS_NAME;
+-  wc.hIconSm = LoadIcon(nullptr, IDI_ICON1);
++  wc.hIconSm = LoadIcon(GetModuleHandle(nullptr), IDI_ICON1);
+ 
+   if (!RegisterClassEx(&wc))
+   {
+@@ -381,14 +389,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
        platform->ToggleFullscreen();
        return 0;
      }
@@ -418,7 +435,7 @@ index 3402fda..67830dd 100644
      }
      break;
  
-@@ -403,7 +405,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -403,7 +407,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
    case WM_KILLFOCUS:
      // Never leave emulation running fast because Space was released while
      // another window had focus and the key-up went elsewhere.

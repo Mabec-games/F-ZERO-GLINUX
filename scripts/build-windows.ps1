@@ -49,6 +49,7 @@ cmake -S lib/ModernGekko -B $build -G Ninja `
     -DMODERNGEKKO_GAMECUBE_CONTROLLERS=ON `
     -DMODERNGEKKO_REQUIRED_DISC_ID=GFZE01 `
     -DMODERNGEKKO_DEFAULT_JIT=ON `
+    "-DMODERNGEKKO_WINDOWS_ICON=$root\packaging\windows\fzero-glinux.ico" `
     @extra
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 cmake --build $build --target moderngekko-launcher moderngekko-run -j $Jobs
