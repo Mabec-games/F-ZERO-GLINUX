@@ -3,7 +3,25 @@
 Updated: 2026-10-25.
 
 
-## Latest update — Release 0.9 (Linux + Windows, automatic unlocks), 2026-10-25
+## Latest update — Windows 0.9 fix: fullscreen at start, drives in the file browser, 2026-10-25
+
+User-confirmed on Windows before this: launcher, gamepad and audio work; Direct3D 11 and Vulkan both play. The public v0.9 Windows zip and `.sha256` were replaced (`--clobber`, same names) and a fix note was added at the top of the release text. New zip SHA-256 `58a9e44cfe7e52f30ba19003b645587ecc9fb628edae8afa6546685ee7a58dac`; downloaded back from GitHub and `sha256sum -c` passes. Linux assets untouched. Dev commits c4554da, 305b87b, fd6ae24, 368d814 (code is in dev only, not pushed to the public repo).
+
+1. User reports: "Start in fullscreen" was ignored, F11/Alt+Enter fullscreen had a thin white border top/left, and the ISO/RVZ browser could not reach drives other than C: (and reportedly did not load / closed for other Windows users).
+2. Fullscreen (`PlatformWin32.cpp`):
+   - Upstream `Init()` had `// TODO: Enter fullscreen if enabled.` and never did. White border = `WS_EX_CLIENTEDGE` (sunken edge) kept in fullscreen; the window is now created without it, and fullscreen also strips/restores the edge ex-styles. `m_fullscreen` replaced by the base class's `m_window_fullscreen`, so `UpdateWindowPosition` no longer records the fullscreen rect as the window size.
+   - Timing matters on Intel UHD 605 + Vulkan: fullscreen in `Init()` (before the renderer) = all-white window while the game ran at 60 FPS (the white the user saw on the first test zip); at `Core::State::Running` = black; right after the first presents = picture at the windowed size with white strips right/bottom (DXGI scaling none, swapchain stayed 1904x1021 on a 1920x1080 client). A second `ResizeSurface()` did not help; F11 off+on did.
+   - Shipped: `after_present_event` hook counts presents; at 60 presents MainLoop enters fullscreen (skipped if F11 already did), 30 presents later the window is shrunk by 1 px and restored, which makes Vulkan take the full size. Verified at start: Vulkan (3 runs) and D3D11 (after a 198 s first shader compile) fill 1920x1080 edge to edge; F11 toggling still fine. The game shows windowed for the first seconds, then switches.
+3. File browsers (`moderngekko_launcher.cpp`):
+   - Drive buttons from `GetLogicalDrives()` every frame (A:-Z:, so each PC shows its own drives, hot-plugged USB appears), wrapping onto new rows. Verified with 12 temporary `subst` drives: 15 buttons on two rows; `subst` entries removed afterwards. Same buttons in the mod-folder browser.
+   - Documents/Downloads via `SHGetKnownFolderPath` (follows OneDrive backup redirection, where `%USERPROFILE%\Documents` may not exist), and browsers open on the nearest existing folder. Likely cause of "browser doesn't load" for other users; not reproducible here (Documents is local on this PC).
+   - Mod "already in Load folder" check compared against `"/"`, never matched on Windows; now `(load / "")`.
+4. UTF-8 process code page: `tools/moderngekko.manifest` (`activeCodePage` UTF-8, `longPathAware`) linked into launcher and runner. Before, `path::string()` was the ANSI code page (throws on names outside it, and Dolphin reads every `std::string` path as UTF-8, so å/ö paths broke). Needs Windows 10 1903+.
+5. Packaging: `.sha256` was written with CRLF, so `sha256sum -c` on Linux failed; `package-windows.ps1` now writes LF. Exporting a patch with PowerShell `>` writes UTF-16 and breaks the build's patch check; export patches from Git Bash.
+6. Still open on Windows: netplay untested, race FPS not measured, not tested on a PC without the VC++ redistributable, the browser fix for OneDrive users is unconfirmed by an affected user.
+
+
+## Previous update — Release 0.9 (Linux + Windows, automatic unlocks), 2026-10-25
 
 - Tag `v0.9` on the public repo, built from the Windows commits (d0d5312) plus README/CI changes. Assets: CI AppImage `F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage`, local Flatpak `F-ZERO-GLINUX-0.9-x86_64.flatpak`, and the Windows zip built on the user's PC (`F-ZERO-GLINUX-preview-20261025-windows-x64.zip`, uploaded as `F-ZERO-GLINUX-0.9-windows-x64.zip`; its inner folder keeps the preview name).
 - CI: on `v*` tags the AppImage is now named after the tag (`GLINUX_VERSION=${GITHUB_REF_NAME#v}`).
@@ -52,7 +70,7 @@ Test PC: Intel Pentium Silver J5040 (4 cores, Intel UHD 605), Windows 11, VS 202
 5. Known Windows gaps / next steps:
    - The Dolphin Win32 game window shows a File/View menu bar (save/load state, pause, mute, fullscreen). Kept; hide it if it looks out of place.
    - Fullscreen verified: F11 enters borderless fullscreen (no taskbar/menu), Escape shows the Quit dialog on top with No focused, No resumes, F11 returns to the window. Audio backend selected: Cubeb (WASAPI); whether sound is heard was not checked.
-   - Physical gamepad, actual audio output and netplay untested on Windows. Race FPS not measured on any backend.
+   - Physical gamepad and audio output: confirmed working by the user later the same day. Netplay untested on Windows. Race FPS not measured on any backend.
    - Packaging: maybe an installer; a Windows CI job (GitHub Actions windows-latest + build-windows.ps1 + package-windows.ps1).
    - The lib/ModernGekko nested submodules libusb, miniupnp and zstd show as dirty: symlinks/line endings mangled by the USB copy. Harmless for building; ignore (`--ignore-submodules` when exporting patches).
 
