@@ -5,7 +5,7 @@ Updated: 2026-10-25.
 
 ## Latest update — First Windows Build: Launcher, Import and Game Boot Working, 2026-10-25 (overnight)
 
-Status: the launcher and runner build with MSVC and F-Zero GX boots and renders on Windows (JIT, Vulkan). No packaging yet. All tests below ran unattended on the user's PC; no physical controller or race was played.
+Status: the launcher and runner build with MSVC; F-Zero GX boots, renders and quits cleanly on Windows (JIT, Direct3D 11 default); a portable zip package builds. Linux CI (AppImage build + Ubuntu 22.04/24.04, Debian 12, Fedora 40 smoke tests) passed on every shared-code change (runs 40149051610, 40151394044). All tests below ran unattended on the user's PC; no physical controller or race was played.
 
 Test PC: Intel Pentium Silver J5040 (4 cores, Intel UHD 605), Windows 11, VS 2022 Build Tools 17.14, CMake 4.4.4, Ninja.
 
@@ -43,7 +43,8 @@ Test PC: Intel Pentium Silver J5040 (4 cores, Intel UHD 605), Windows 11, VS 202
 
 5. Known Windows gaps / next steps:
    - The Dolphin Win32 game window shows a File/View menu bar (save/load state, pause, mute, fullscreen). Kept; hide it if it looks out of place.
-   - Physical gamepad, audio output (cubeb/WASAPI), fullscreen and netplay untested on Windows. Race FPS not measured on any backend.
+   - Fullscreen verified: F11 enters borderless fullscreen (no taskbar/menu), Escape shows the Quit dialog on top with No focused, No resumes, F11 returns to the window. Audio backend selected: Cubeb (WASAPI); whether sound is heard was not checked.
+   - Physical gamepad, actual audio output and netplay untested on Windows. Race FPS not measured on any backend.
    - Packaging: maybe an installer; a Windows CI job (GitHub Actions windows-latest + build-windows.ps1 + package-windows.ps1).
    - The lib/ModernGekko nested submodules libusb, miniupnp and zstd show as dirty: symlinks/line endings mangled by the USB copy. Harmless for building; ignore (`--ignore-submodules` when exporting patches).
 
