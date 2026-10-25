@@ -384,10 +384,24 @@ index f7e1ca2..2ae49aa 100644
    else if (symbol == XKB_KEY_F10)
    {
 diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
-index 3402fda..3e3b455 100644
+index 3402fda..67830dd 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
-@@ -381,14 +381,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -90,7 +90,13 @@ private:
+ PlatformWin32::~PlatformWin32()
+ {
+   if (m_hwnd)
++  {
++    // DestroyWindow sends WM_KILLFOCUS. Detach first so WndProc leaves the config
++    // system alone: the runtime has already shut it down by now, and touching it
++    // crashed every exit with STATUS_FATAL_USER_CALLBACK_EXCEPTION.
++    SetWindowLongPtr(m_hwnd, GWLP_USERDATA, 0);
+     DestroyWindow(m_hwnd);
++  }
+ }
+ 
+ bool PlatformWin32::RegisterRenderWindowClass()
+@@ -381,14 +387,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
        platform->ToggleFullscreen();
        return 0;
      }
@@ -404,6 +418,16 @@ index 3402fda..3e3b455 100644
      }
      break;
  
+@@ -403,7 +405,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+   case WM_KILLFOCUS:
+     // Never leave emulation running fast because Space was released while
+     // another window had focus and the key-up went elsewhere.
+-    Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
++    if (platform)
++      Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
+     break;
+ 
+   case WM_SYSKEYDOWN:
 diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
 index 8d0ae0c..0e01bb2 100644
 --- a/Source/Core/DolphinNoGUI/PlatformX11.cpp

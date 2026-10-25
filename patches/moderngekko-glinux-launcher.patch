@@ -1,8 +1,27 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c0548a0..93ab90e 100644
+index c0548a0..67b9118 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -417,6 +417,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+@@ -46,6 +46,8 @@ option(MODERNGEKKO_PORTABLE_DEFAULT_GAME
+        "Read and write default-game.txt beside branded executables" OFF)
+ option(MODERNGEKKO_GAMECUBE_CONTROLLERS
+        "Generate GameCube controller profiles instead of Wii Remote profiles" OFF)
++option(MODERNGEKKO_DEFAULT_JIT
++       "Use Dolphin's JIT unless MODERNGEKKO_STATICRECOMP=1 is set" OFF)
+ set(MODERNGEKKO_LOG_FILENAME "ModernGekko.log" CACHE STRING
+     "Runner log filename")
+ set(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME "" CACHE STRING
+@@ -245,6 +247,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
+         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
+     )
++    if(MODERNGEKKO_DEFAULT_JIT)
++        target_compile_definitions(moderngekko PRIVATE MODERNGEKKO_DEFAULT_JIT=1)
++    endif()
+     if(NOT ANDROID)
+         target_sources(moderngekko PRIVATE
+             vendor/dolphin/Source/Core/InputCommon/ControllerInterface/Touch/InputOverrider.cpp)
+@@ -417,6 +422,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
          tools/moderngekko_run.cpp
          tools/netplay_compatibility.cpp
          tools/netplay_session.cpp
@@ -10,7 +29,7 @@ index c0548a0..93ab90e 100644
          tools/frontend_config.cpp
          tools/dol_patch.cpp
          vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
-@@ -515,14 +516,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+@@ -515,14 +521,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
  
      add_executable(moderngekko-launcher
          tools/moderngekko_launcher.cpp
@@ -29,7 +48,7 @@ index c0548a0..93ab90e 100644
      # The launcher only calls the game-inspection surface directly, but the
      # Dolphin static libraries still require the Host_* callbacks implemented
      # in the runtime object. Keep that object from being discarded by the
-@@ -671,6 +675,14 @@ if(BUILD_TESTING)
+@@ -671,6 +680,14 @@ if(BUILD_TESTING)
      target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
      add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
  
@@ -89,7 +108,7 @@ index 0adc855..0cf113f 100644
    // Boot straight into a savestate instead of from the title screen.
    std::optional<std::filesystem::path> load_state_path;
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..fb2a63f 100644
+index f9b5405..48e98e0 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -6,6 +6,7 @@
@@ -116,7 +135,21 @@ index f9b5405..fb2a63f 100644
  bool s_external_ui_common = false;
  std::unique_ptr<BootSessionData> s_boot_session_data;
  u64 s_previous_net_wait_ns = 0;
-@@ -113,10 +116,12 @@ PowerPC::CPUCore SelectCPUCore() {
+@@ -98,7 +101,13 @@ std::string FormatWindowTitle(const std::string &title, double fps) {
+ PowerPC::CPUCore SelectCPUCore() {
+   static const bool static_recomp = [] {
+     const char *v = std::getenv("MODERNGEKKO_STATICRECOMP");
++#ifdef MODERNGEKKO_DEFAULT_JIT
++    // Builds without a wrapper script (Windows) have nothing to set the
++    // variable, so static recompilation becomes opt-in there.
++    return v && *v && *v != '0';
++#else
+     return !v || !*v || *v != '0';
++#endif
+   }();
+   if (static_recomp)
+     return PowerPC::CPUCore::StaticRecomp;
+@@ -113,10 +122,12 @@ PowerPC::CPUCore SelectCPUCore() {
  std::vector<std::string> Host_GetPreferredLocales() { return {}; }
  void Host_PPCSymbolsChanged() {}
  void Host_PPCBreakpointsChanged() {}
@@ -130,7 +163,7 @@ index f9b5405..fb2a63f 100644
  }
  void Host_UpdateTitle(const std::string &) {
    if (!s_platform)
-@@ -514,6 +519,7 @@ struct Runtime::Impl {
+@@ -514,6 +525,7 @@ struct Runtime::Impl {
    RuntimeAutomationState automation_state;
    Common::EventHook present_hook;
    bool automation_registered = false;
@@ -138,7 +171,7 @@ index f9b5405..fb2a63f 100644
    std::jthread automation_thread;
  };
  
-@@ -569,7 +575,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -569,7 +581,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    else if (config.module.kind == ModuleSource::Kind::AttachedDescriptor)
      module_result =
          validation_library.Attach(config.module.descriptor, requirements);
@@ -147,7 +180,7 @@ index f9b5405..fb2a63f 100644
      return {
          {},
          RuntimeError{
-@@ -613,6 +619,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -613,6 +625,11 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
      impl->ui_initialized = true;
    }
    Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
@@ -159,7 +192,7 @@ index f9b5405..fb2a63f 100644
  
    if (impl->config.headless)
      impl->platform = Platform::CreateHeadlessPlatform();
-@@ -639,6 +650,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -639,6 +656,20 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
                           "the requested Dolphin host platform is unavailable"}};
    }
  
@@ -180,7 +213,7 @@ index f9b5405..fb2a63f 100644
    const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
    UICommon::InitControllers(wsi);
    impl->controllers_initialized = true;
-@@ -658,6 +683,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -658,6 +689,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    impl->platform->SetTitle(impl->title);
  
    Config::SetBase(Config::MAIN_CPU_CORE, SelectCPUCore());
@@ -188,7 +221,7 @@ index f9b5405..fb2a63f 100644
    if (!impl->config.graphics.backend.empty())
      Config::SetBase(Config::MAIN_GFX_BACKEND, impl->config.graphics.backend);
    else if (impl->config.headless)
-@@ -665,6 +691,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -665,6 +697,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    if (impl->config.graphics.internal_resolution_scale)
      Config::SetBase(Config::GFX_EFB_SCALE,
                      *impl->config.graphics.internal_resolution_scale);
@@ -213,7 +246,7 @@ index f9b5405..fb2a63f 100644
    Config::SetBase(Config::GFX_SHADER_CACHE, true);
    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                    ShaderCompilationMode::AsynchronousUberShaders);
-@@ -782,6 +826,8 @@ RuntimeRunResult Runtime::Run() {
+@@ -782,6 +832,8 @@ RuntimeRunResult Runtime::Run() {
          if (state == Core::State::Uninitialized && m_impl->platform)
            m_impl->platform->Stop();
        });
@@ -222,7 +255,7 @@ index f9b5405..fb2a63f 100644
    if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot),
                               m_impl->platform->GetWindowSystemInfo())) {
      m_impl->running = false;
-@@ -792,6 +838,12 @@ RuntimeRunResult Runtime::Run() {
+@@ -792,6 +844,12 @@ RuntimeRunResult Runtime::Run() {
    m_impl->booted = true;
    m_impl->present_hook =
        GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
