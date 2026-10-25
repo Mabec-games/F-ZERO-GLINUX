@@ -26,10 +26,11 @@ Test PC: Intel Pentium Silver J5040 (4 cores, Intel UHD 605), Windows 11, VS 202
    - `game.cpp` `HashDirectorySha256`: the sort comparator called `std::filesystem::relative` (OS path resolution) O(n log n) times; now relative paths are computed once with `lexically_relative`. Same hash (`7df46c61…502e15` for the user's files/), 52.7 s -> 20 s.
    - `game.cpp` `HashFileSha256` (MSVC only): streams the file through Windows CNG/BCrypt (uses SHA-NI) instead of loading it whole into the portable SHA-256: 20 s -> ~10 s, same hash. `InspectGame` hashes the whole 1.4 GB game at launcher start and twice per runner start (runner + `Runtime::Create`), so this was ~105 s of blank wait before boot.
    - Quit dialog: `SetKeyboardFocusHere` leaves ImGui's nav cursor hidden, and a hidden cursor ignores Enter/Space/gamepad A until a direction is pressed, so pressing Enter/A immediately did nothing and No was not highlighted. Added `ImGui::SetNavCursorVisible(true)`; No is now highlighted cyan and Enter/Space/Escape/Right+Enter/Right+Left+Enter all verified with real key events. Affects Linux too (same code).
+   - Asset-hash cache (`HashDirectorySha256`): result cached in `<game>/.files.sha256-cache` (`v1 <stamp> <hash>`), stamp = SHA-256 over every file's relative path, size and mtime; any change rehashes, unwritable location just skips caching. Verified: cold 12.5 s, cached 0.07 s, `touch` on one file -> rehash, hash identical throughout. Applies to Linux too.
+   - Result on the J5040: launcher opens (with the imported game "Ready") in ~1.4 s; runner first frame in 5-6 s (was >100 s at the start of the session, never reached in a 90 s test).
    - Test note: PowerShell `SendKeys` arrows lack the extended-key flag, so SDL sees keypad keys; use `keybd_event` with `KEYEVENTF_EXTENDEDKEY` for synthetic arrow tests.
 
 4. Known Windows gaps / next steps:
-   - Launch still hashes the game 3x (~30 s total on this PC). Cache the asset hash (e.g. keyed on file count/sizes/mtimes) or pass the launcher's metadata to the runner.
    - Game window title-bar icon is the default warning triangle and the Dolphin Win32 window shows a File/View menu bar; no app icon/resource yet.
    - Physical gamepad, audio (cubeb/WASAPI), fullscreen, D3D11/D3D12 backends and netplay untested on Windows. Default backend is Vulkan (`moderngekko_run.cpp`); consider D3D11 as the Windows default for weak/odd GPUs.
    - Packaging: Windows zip (exe + Sys + Assets + licenses) and maybe an installer; a Windows CI job.

@@ -236,7 +236,7 @@ index f9b5405..fb2a63f 100644
                                                     std::memory_order_relaxed);
          m_impl->automation_state.present_count.store(info.present_count,
 diff --git a/src/runtime/game.cpp b/src/runtime/game.cpp
-index 85860a5..9d55af1 100644
+index 85860a5..faff075 100644
 --- a/src/runtime/game.cpp
 +++ b/src/runtime/game.cpp
 @@ -11,6 +11,18 @@
@@ -304,7 +304,7 @@ index 85860a5..9d55af1 100644
  }
  
  std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root)
-@@ -31,27 +78,27 @@ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root
+@@ -31,42 +78,83 @@ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root
    std::error_code ec;
    if (!std::filesystem::is_directory(root, ec) || ec)
      return std::nullopt;
@@ -312,7 +312,14 @@ index 85860a5..9d55af1 100644
 +  // Relative paths are computed once, lexically: std::filesystem::relative
 +  // resolves both paths through the OS, and calling it from the sort
 +  // comparator made hashing a game take most of a minute on Windows.
-+  std::vector<std::pair<std::string, std::filesystem::path>> files;
++  struct File
++  {
++    std::string relative;
++    std::filesystem::path path;
++    std::uintmax_t size;
++    std::int64_t modified;
++  };
++  std::vector<File> files;
    std::filesystem::recursive_directory_iterator iterator(
        root, std::filesystem::directory_options::skip_permission_denied, ec);
    const std::filesystem::recursive_directory_iterator end;
@@ -320,8 +327,15 @@ index 85860a5..9d55af1 100644
    {
      if (iterator->is_regular_file(ec) && !ec)
 -      files.push_back(iterator->path());
-+      files.emplace_back(iterator->path().lexically_relative(root).generic_string(),
-+                         iterator->path());
++    {
++      const auto size = iterator->file_size(ec);
++      const auto modified = ec ? std::filesystem::file_time_type{} : iterator->last_write_time(ec);
++      if (ec)
++        break;
++      files.push_back({iterator->path().lexically_relative(root).generic_string(),
++                       iterator->path(), size,
++                       static_cast<std::int64_t>(modified.time_since_epoch().count())});
++    }
      iterator.increment(ec);
    }
    if (ec)
@@ -330,17 +344,70 @@ index 85860a5..9d55af1 100644
 -    return std::filesystem::relative(left, root).generic_string() <
 -           std::filesystem::relative(right, root).generic_string();
 -  });
-+  std::ranges::sort(files, {}, &std::pair<std::string, std::filesystem::path>::first);
++  std::ranges::sort(files, {}, &File::relative);
++
++  const auto append_u64 = [](std::vector<std::uint8_t>& out, std::uint64_t value) {
++    for (int shift = 56; shift >= 0; shift -= 8)
++      out.push_back(static_cast<std::uint8_t>(value >> shift));
++  };
++  // Every launch inspects the game more than once, and hashing all of it takes
++  // seconds to minutes. The result is cached beside the directory, keyed on each
++  // file's path, size and modification time, so any change rehashes.
++  std::vector<std::uint8_t> stamp_input;
++  for (const auto& file : files)
++  {
++    append_u64(stamp_input, file.relative.size());
++    stamp_input.insert(stamp_input.end(), file.relative.begin(), file.relative.end());
++    append_u64(stamp_input, file.size);
++    append_u64(stamp_input, static_cast<std::uint64_t>(file.modified));
++  }
++  const std::string stamp = Sha256(std::move(stamp_input));
++  std::filesystem::path cache_path;
++  if (!root.filename().empty())
++    cache_path = root.parent_path() / ("." + root.filename().string() + ".sha256-cache");
++  if (!cache_path.empty())
++  {
++    std::ifstream cache(cache_path);
++    std::string version, cached_stamp, cached_hash;
++    if (cache >> version >> cached_stamp >> cached_hash && version == "v1" &&
++        cached_stamp == stamp && cached_hash.size() == 64)
++      return cached_hash;
++  }
++
    std::vector<std::uint8_t> manifest;
 -  for (const auto& path : files)
-+  for (const auto& [relative, path] : files)
++  for (const auto& file : files)
    {
 -    const std::string relative = std::filesystem::relative(path, root, ec).generic_string();
 -    if (ec)
-+    if (relative.empty())
++    if (file.relative.empty())
        return std::nullopt;
-     const auto size = std::filesystem::file_size(path, ec);
-     const auto hash = HashFileSha256(path);
+-    const auto size = std::filesystem::file_size(path, ec);
+-    const auto hash = HashFileSha256(path);
+-    if (ec || !hash)
++    const auto hash = HashFileSha256(file.path);
++    if (!hash)
+       return std::nullopt;
+-    const auto append_u64 = [&](std::uint64_t value) {
+-      for (int shift = 56; shift >= 0; shift -= 8)
+-        manifest.push_back(static_cast<std::uint8_t>(value >> shift));
+-    };
+-    append_u64(relative.size());
+-    manifest.insert(manifest.end(), relative.begin(), relative.end());
+-    append_u64(size);
++    append_u64(manifest, file.relative.size());
++    manifest.insert(manifest.end(), file.relative.begin(), file.relative.end());
++    append_u64(manifest, file.size);
+     manifest.insert(manifest.end(), hash->begin(), hash->end());
+   }
+-  return Sha256(std::move(manifest));
++  std::string hash = Sha256(std::move(manifest));
++  if (!cache_path.empty())
++    std::ofstream(cache_path, std::ios::trunc) << "v1 " << stamp << ' ' << hash << '\n';
++  return hash;
+ }
+ 
+ GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
 index 6bb9e0e..0d1521f 100644
 --- a/tests/frontend_config_test.cpp
