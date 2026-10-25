@@ -186,6 +186,22 @@ See the [AppImage build guide](packaging/README.md) and
 [upstream template's dependency notes](docs/UPSTREAM-TEMPLATE.md). Building on a
 newer host can raise the resulting AppImage's minimum system requirements.
 
+**Windows (experimental):** install Visual Studio 2022 Build Tools with
+"Desktop development with C++", CMake and Ninja. Clone to a short path such as
+`C:\dev`: the nested submodules exceed Windows' 260-character path limit in deep
+folders. Then, in PowerShell:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install --id Kitware.CMake -e
+winget install --id Ninja-build.Ninja -e
+powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
+```
+
+The package is a portable zip in `dist\`; run `F-ZERO GLINUX.exe`. Saves and the
+imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
+
 ## Project status
 
 | Area | Status |
@@ -195,6 +211,7 @@ newer host can raise the resulting AppImage's minimum system requirements.
 | Static recompilation | Experimental; performance work remains |
 | Native widescreen | In-game setting; remembered in the player's save |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
+| Windows | Experimental: builds with MSVC; launcher, import and game boot work. Gamepads and races not yet tested |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
 | Mods | HD texture packs and Dolphin graphics mods from any folder |
 

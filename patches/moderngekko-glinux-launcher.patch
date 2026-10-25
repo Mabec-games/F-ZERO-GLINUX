@@ -468,7 +468,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..0d1521f 100644
+index 6bb9e0e..4054792 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -21,6 +21,42 @@ int main() {
@@ -514,7 +514,12 @@ index 6bb9e0e..0d1521f 100644
    const std::string controller = "SDL/0/Test Controller";
    if (!moderngekko::frontend::SaveConfig(directory, "1920x1080", false,
                                           controller, &error))
-@@ -33,6 +69,55 @@ int main() {
+@@ -29,10 +65,59 @@ int main() {
+   const auto loaded = moderngekko::frontend::LoadConfig(directory, false);
+   if (!loaded || loaded.dolphin_scale != 3 || loaded.show_fps_in_title ||
+       loaded.controller != controller ||
+-      loaded.graphics_backend != "Vulkan") {
++      loaded.graphics_backend != moderngekko::frontend::DEFAULT_GRAPHICS_BACKEND) {
      return 2;
    }
  
@@ -774,7 +779,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..509c6f0 100644
+index 03740d4..c668766 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -785,7 +790,7 @@ index 03740d4..509c6f0 100644
  #include <string_view>
  
  namespace fs = std::filesystem;
-@@ -26,14 +27,6 @@ std::string Lower(std::string value) {
+@@ -26,20 +27,18 @@ std::string Lower(std::string value) {
    return value;
  }
  
@@ -800,7 +805,19 @@ index 03740d4..509c6f0 100644
  std::string NormalizeGraphicsBackend(std::string value) {
    const std::string lower = Lower(Trim(std::move(value)));
    if (lower == "vulkan")
-@@ -73,12 +66,60 @@ std::string_view ControllerSectionPrefix() {
+     return "Vulkan";
+   if (lower == "opengl" || lower == "ogl")
+     return "OGL";
++#if defined(_WIN32)
++  if (lower == "d3d" || lower == "d3d11" || lower == "direct3d 11")
++    return "D3D";
++  if (lower == "d3d12" || lower == "direct3d 12")
++    return "D3D12";
++#endif
+   return {};
+ }
+ 
+@@ -73,18 +72,70 @@ std::string_view ControllerSectionPrefix() {
  
  } // namespace
  
@@ -865,7 +882,17 @@ index 03740d4..509c6f0 100644
    };
    return resolutions;
  }
-@@ -126,6 +167,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+ 
+ const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends() {
+   static const std::vector<GraphicsBackendOption> backends = {
++#if defined(_WIN32)
++      {"Direct3D 11", "D3D"},
++      {"Direct3D 12", "D3D12"},
++#endif
+       {"Vulkan", "Vulkan"},
+       {"OpenGL", "OGL"},
+   };
+@@ -126,6 +177,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
        if (config.graphics_backend.empty())
          return {.error = "graphics backend must be Vulkan or OpenGL"};
      }
@@ -895,7 +922,7 @@ index 03740d4..509c6f0 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +204,13 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +214,13 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -909,7 +936,7 @@ index 03740d4..509c6f0 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +256,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +266,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -928,7 +955,7 @@ index 03740d4..509c6f0 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +289,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +299,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -956,7 +983,7 @@ index 03740d4..509c6f0 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +335,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,14 +345,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -982,7 +1009,7 @@ index 03740d4..509c6f0 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -271,6 +367,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -271,6 +377,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
         << "address=" << config.netplay_address << '\n'
         << "port=" << config.netplay_port << '\n'
         << "buffer=" << config.netplay_buffer << '\n';
@@ -990,7 +1017,7 @@ index 03740d4..509c6f0 100644
    return true;
  }
  
-@@ -336,6 +433,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +443,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -1046,12 +1073,21 @@ index 03740d4..509c6f0 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +518,62 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +528,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
 +    if (controllers[i] == KEYBOARD_DEVICE) {
 +      // Dolphin's own keyboard layout, with the same X / Y swap as gamepads.
++      // Letters are named alike everywhere; these keys are not.
++#if defined(_WIN32)
++      // DirectInput names, from Dolphin's DInput/NamedKeys.h.
++      constexpr std::string_view enter = "RETURN", up = "UP", down = "DOWN",
++                                 left = "LEFT", right = "RIGHT";
++#else
++      constexpr std::string_view enter = "Return", up = "Up", down = "Down",
++                                 left = "Left", right = "Right";
++#endif
 +      output << "Device = " << controllers[i] << '\n'
 +             << "Buttons/A = `X`\n"
 +                "Buttons/B = `Z`\n"
@@ -1059,12 +1095,12 @@ index 03740d4..509c6f0 100644
 +                     ? "Buttons/X = `S`\nButtons/Y = `C`\n"
 +                     : "Buttons/X = `C`\nButtons/Y = `S`\n")
 +             << "Buttons/Z = `D`\n"
-+                "Buttons/Start = `Return`\n"
-+                "Main Stick/Up = `Up`\n"
-+                "Main Stick/Down = `Down`\n"
-+                "Main Stick/Left = `Left`\n"
-+                "Main Stick/Right = `Right`\n"
-+                "Main Stick/Modifier = `Shift`\n"
++             << "Buttons/Start = `" << enter << "`\n"
++             << "Main Stick/Up = `" << up << "`\n"
++             << "Main Stick/Down = `" << down << "`\n"
++             << "Main Stick/Left = `" << left << "`\n"
++             << "Main Stick/Right = `" << right << "`\n"
++             << "Main Stick/Modifier = `Shift`\n"
 +                "C-Stick/Up = `I`\n"
 +                "C-Stick/Down = `K`\n"
 +                "C-Stick/Left = `J`\n"
@@ -1112,7 +1148,7 @@ index 03740d4..509c6f0 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +675,228 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +694,228 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -1342,15 +1378,19 @@ index 03740d4..509c6f0 100644
 +}
  } // namespace moderngekko::frontend
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..11cf821 100644
+index 3b18d05..f7708cf 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
-@@ -8,9 +8,18 @@
+@@ -8,9 +8,22 @@
  #include <vector>
  
  namespace moderngekko::frontend {
-+// Dolphin's X11 keyboard, used when no gamepad is connected.
++// Dolphin's keyboard device, used when no gamepad is connected.
++#if defined(_WIN32)
++inline constexpr std::string_view KEYBOARD_DEVICE = "DInput/0/Keyboard Mouse";
++#else
 +inline constexpr std::string_view KEYBOARD_DEVICE = "XInput2/0/Virtual core pointer";
++#endif
 +inline constexpr const char *KEYBOARD_HELP =
 +    "Keyboard: arrows steer, X = A, Z = B, C = X, S = Y, D = Z, Q / W = L / R, "
 +    "Enter = Start.";
@@ -1364,8 +1404,18 @@ index 3b18d05..11cf821 100644
  };
  
  struct GraphicsBackendOption {
-@@ -20,12 +29,23 @@ struct GraphicsBackendOption {
+@@ -18,14 +31,33 @@ struct GraphicsBackendOption {
+   const char *value;
+ };
  
++#if defined(_WIN32)
++// Dolphin's own Windows default; also measured ahead of Vulkan on Intel graphics
++// (51-60 vs 42-48 FPS in menus on UHD 605).
++inline constexpr const char *DEFAULT_GRAPHICS_BACKEND = "D3D";
++#else
++inline constexpr const char *DEFAULT_GRAPHICS_BACKEND = "Vulkan";
++#endif
++
  struct ConfigResult {
    int dolphin_scale = 0;
 +  int output_width = 0;
@@ -1375,7 +1425,8 @@ index 3b18d05..11cf821 100644
 +  std::string anti_aliasing = "off";
 +  int anisotropy = 1;
    std::string resolution;
-   std::string graphics_backend = "Vulkan";
+-  std::string graphics_backend = "Vulkan";
++  std::string graphics_backend = DEFAULT_GRAPHICS_BACKEND;
    std::string controller;
    std::vector<std::string> controllers;
    bool show_fps_in_title = true;
@@ -1388,7 +1439,7 @@ index 3b18d05..11cf821 100644
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -35,6 +55,12 @@ struct ConfigResult {
+@@ -35,6 +67,12 @@ struct ConfigResult {
    explicit operator bool() const { return error.empty(); }
  };
  
@@ -1401,7 +1452,7 @@ index 3b18d05..11cf821 100644
  const std::vector<ResolutionOption> &SupportedResolutions();
  const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
-@@ -48,6 +74,8 @@ std::string
+@@ -48,6 +86,8 @@ std::string
  ReadConfiguredController(const std::filesystem::path &user_directory);
  std::vector<std::string>
  ReadConfiguredControllers(const std::filesystem::path &user_directory);
@@ -1410,7 +1461,7 @@ index 3b18d05..11cf821 100644
  bool ControllerConfigExists(const std::filesystem::path &user_directory);
  bool GenerateControllerConfig(const std::filesystem::path &user_directory,
                                std::span<const std::string> controllers,
-@@ -60,4 +88,8 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+@@ -60,4 +100,8 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                              std::string *message);
  bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                              std::string_view controller, std::string *message);
@@ -2943,7 +2994,7 @@ index 7699c3d..a954480 100644
    SDL_DestroyWindow(window);
    SDL_Quit();
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..430d4ff 100644
+index d6b3569..8eb6bec 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -6,6 +6,7 @@
@@ -2997,8 +3048,12 @@ index d6b3569..430d4ff 100644
    if (config.graphics.backend.empty())
      config.graphics.backend = frontend_config.graphics_backend;
    config.fullscreen = frontend_config.fullscreen;
-@@ -338,6 +354,27 @@ int RunMain(int argc, char **argv) {
-     config.graphics.backend = "Vulkan";
+@@ -335,9 +351,30 @@ int RunMain(int argc, char **argv) {
+ 
+ #if defined(__linux__) || defined(_WIN32)
+   if (!config.headless && config.graphics.backend.empty())
+-    config.graphics.backend = "Vulkan";
++    config.graphics.backend = moderngekko::frontend::DEFAULT_GRAPHICS_BACKEND;
  #endif
  
 +  config.enable_cheats = cli_cheats.value_or(frontend_config.cheats);
