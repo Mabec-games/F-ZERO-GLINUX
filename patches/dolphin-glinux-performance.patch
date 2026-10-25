@@ -384,9 +384,19 @@ index f7e1ca2..2ae49aa 100644
    else if (symbol == XKB_KEY_F10)
    {
 diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
-index 3402fda..977ab19 100644
+index 3402fda..c80c6ec 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+@@ -77,8 +77,8 @@ private:
+   std::vector<std::string> m_load_state_paths;
+   std::time_t m_last_save_time{};
+   std::size_t m_save_sequence{};
+-  bool m_fullscreen = false;
+   LONG m_windowed_style = 0;
++  LONG m_windowed_ex_style = 0;
+   RECT m_windowed_rect{};
+ 
+   int m_window_x = Config::Get(Config::MAIN_RENDER_WINDOW_XPOS);
 @@ -90,7 +90,13 @@ private:
  PlatformWin32::~PlatformWin32()
  {
@@ -418,7 +428,80 @@ index 3402fda..977ab19 100644
  
    if (!RegisterClassEx(&wc))
    {
-@@ -381,14 +389,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -120,7 +128,9 @@ bool PlatformWin32::RegisterRenderWindowClass()
+ 
+ bool PlatformWin32::CreateRenderWindow()
+ {
+-  m_hwnd = CreateWindowEx(WS_EX_CLIENTEDGE, WINDOW_CLASS_NAME, _T("Dolphin"), WS_OVERLAPPEDWINDOW,
++  // No WS_EX_CLIENTEDGE: its sunken edge drew a light line along the top and
++  // left of the picture, and stayed visible in fullscreen.
++  m_hwnd = CreateWindowEx(0, WINDOW_CLASS_NAME, _T("Dolphin"), WS_OVERLAPPEDWINDOW,
+                           m_window_x < 0 ? CW_USEDEFAULT : m_window_x,
+                           m_window_y < 0 ? CW_USEDEFAULT : m_window_y, m_window_width,
+                           m_window_height, nullptr, nullptr, GetModuleHandle(nullptr), this);
+@@ -177,7 +187,7 @@ void PlatformWin32::RefreshMenu(const HMENU menu)
+                   MF_BYCOMMAND |
+                       (Config::Get(Config::MAIN_AUDIO_MUTED) ? MF_CHECKED : MF_UNCHECKED));
+     CheckMenuItem(m_view_menu, ID_FULLSCREEN,
+-                  MF_BYCOMMAND | (m_fullscreen ? MF_CHECKED : MF_UNCHECKED));
++                  MF_BYCOMMAND | (m_window_fullscreen ? MF_CHECKED : MF_UNCHECKED));
+     return;
+   }
+ 
+@@ -231,10 +241,11 @@ void PlatformWin32::SaveStateToStatesDirectory()
+ 
+ void PlatformWin32::ToggleFullscreen()
+ {
+-  if (!m_fullscreen)
++  if (!m_window_fullscreen)
+   {
+     GetWindowRect(m_hwnd, &m_windowed_rect);
+     m_windowed_style = GetWindowLong(m_hwnd, GWL_STYLE);
++    m_windowed_ex_style = GetWindowLong(m_hwnd, GWL_EXSTYLE);
+ 
+     MONITORINFO monitor{};
+     monitor.cbSize = sizeof(monitor);
+@@ -243,21 +254,25 @@ void PlatformWin32::ToggleFullscreen()
+ 
+     SetMenu(m_hwnd, nullptr);
+     SetWindowLong(m_hwnd, GWL_STYLE, m_windowed_style & ~WS_OVERLAPPEDWINDOW);
++    SetWindowLong(m_hwnd, GWL_EXSTYLE,
++                  m_windowed_ex_style & ~(WS_EX_CLIENTEDGE | WS_EX_WINDOWEDGE |
++                                          WS_EX_STATICEDGE | WS_EX_DLGMODALFRAME));
+     SetWindowPos(m_hwnd, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+                  monitor.rcMonitor.right - monitor.rcMonitor.left,
+                  monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+                  SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+-    m_fullscreen = true;
++    m_window_fullscreen = true;
+     return;
+   }
+ 
+   SetWindowLong(m_hwnd, GWL_STYLE, m_windowed_style);
++  SetWindowLong(m_hwnd, GWL_EXSTYLE, m_windowed_ex_style);
+   SetMenu(m_hwnd, m_menu);
+   SetWindowPos(m_hwnd, nullptr, m_windowed_rect.left, m_windowed_rect.top,
+                m_windowed_rect.right - m_windowed_rect.left,
+                m_windowed_rect.bottom - m_windowed_rect.top,
+                SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_NOZORDER);
+-  m_fullscreen = false;
++  m_window_fullscreen = false;
+ }
+ 
+ bool PlatformWin32::Init()
+@@ -265,10 +280,10 @@ bool PlatformWin32::Init()
+   if (!RegisterRenderWindowClass() || !CreateRenderWindow() || !CreateMenus())
+     return false;
+ 
+-  // TODO: Enter fullscreen if enabled.
+   if (Config::Get(Config::MAIN_FULLSCREEN))
+   {
+     ProcessEvents();
++    ToggleFullscreen();
+   }
+ 
+   if (Config::Get(Config::MAIN_DISABLE_SCREENSAVER))
+@@ -381,14 +396,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
        platform->ToggleFullscreen();
        return 0;
      }
@@ -435,7 +518,7 @@ index 3402fda..977ab19 100644
      }
      break;
  
-@@ -403,7 +407,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -403,7 +414,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
    case WM_KILLFOCUS:
      // Never leave emulation running fast because Space was released while
      // another window had focus and the key-up went elsewhere.

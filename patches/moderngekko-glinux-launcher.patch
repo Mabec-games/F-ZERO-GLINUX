@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c0548a0..409ea43 100644
+index c0548a0..de20cba 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -46,10 +46,14 @@ option(MODERNGEKKO_PORTABLE_DEFAULT_GAME
@@ -54,10 +54,16 @@ index c0548a0..409ea43 100644
      # The launcher only calls the game-inspection surface directly, but the
      # Dolphin static libraries still require the Host_* callbacks implemented
      # in the runtime object. Keep that object from being discarded by the
-@@ -652,6 +663,19 @@ if(WIN32)
+@@ -652,6 +663,25 @@ if(WIN32)
              endif()
          endif()
      endforeach()
++    foreach(_moderngekko_manifest_target moderngekko-launcher moderngekko-run)
++        if(TARGET ${_moderngekko_manifest_target})
++            target_sources(${_moderngekko_manifest_target} PRIVATE
++                tools/moderngekko.manifest)
++        endif()
++    endforeach()
 +    if(MODERNGEKKO_WINDOWS_ICON)
 +        # Resource 101 is the IDI_ICON1 Dolphin's Win32 platform loads for the game
 +        # window; Explorer and the taskbar use an executable's first icon.
@@ -74,7 +80,7 @@ index c0548a0..409ea43 100644
  endif()
  
  if(BUILD_TESTING)
-@@ -671,6 +695,14 @@ if(BUILD_TESTING)
+@@ -671,6 +701,14 @@ if(BUILD_TESTING)
      target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
      add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
  
@@ -1923,11 +1929,28 @@ index 0000000..99e2fc5
 +  style.Colors[ImGuiCol_TextDisabled] = ImVec4(.68f, .72f, .78f, 1);
 +}
 +} // namespace moderngekko::frontend
+diff --git a/tools/moderngekko.manifest b/tools/moderngekko.manifest
+new file mode 100644
+index 0000000..1714c24
+--- /dev/null
++++ b/tools/moderngekko.manifest
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
++<!-- UTF-8 as the process code page: std::filesystem, argv and getenv then agree
++     with Dolphin, which treats every std::string path as UTF-8. -->
++<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
++  <application xmlns="urn:schemas-microsoft-com:asm.v3">
++    <windowsSettings>
++      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
++      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
++    </windowsSettings>
++  </application>
++</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..a954480 100644
+index 7699c3d..5fe7fc2 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
-@@ -1,9 +1,13 @@
+@@ -1,14 +1,22 @@
  #include "frontend_config.hpp"
 +#include "graphics_mods.hpp"
 +#include "launcher_style.hpp"
@@ -1941,7 +1964,16 @@ index 7699c3d..a954480 100644
  #include "DiscIO/DiscExtractor.h"
  #include "DiscIO/Filesystem.h"
  #include "DiscIO/Volume.h"
-@@ -16,6 +20,7 @@
+ 
+ #include <SDL3/SDL.h>
++#if defined(_WIN32)
++#include <windows.h>
++#include <shlobj.h>
++#endif
+ #include <imgui.h>
+ #include <imgui_impl_sdl3.h>
+ #include <imgui_impl_sdlrenderer3.h>
+@@ -16,6 +24,7 @@
  #include <algorithm>
  #include <array>
  #include <atomic>
@@ -1949,7 +1981,7 @@ index 7699c3d..a954480 100644
  #include <cstdio>
  #include <cstdlib>
  #include <filesystem>
-@@ -123,9 +128,28 @@ std::vector<ControllerOption> EnumerateControllers()
+@@ -123,9 +132,28 @@ std::vector<ControllerOption> EnumerateControllers()
      result.emplace_back(std::move(option));
    }
    SDL_free(joystick_ids);
@@ -1978,7 +2010,83 @@ index 7699c3d..a954480 100644
  int FindController(const std::vector<ControllerOption>& controllers, std::string_view device)
  {
    const auto found = std::ranges::find(controllers, device, &ControllerOption::device);
-@@ -337,7 +361,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -153,9 +181,25 @@ fs::path DefaultUserDirectory()
+   return std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user";
+ }
+ 
++#if defined(_WIN32)
++// Known folders follow OneDrive backup and other redirection, where
++// %USERPROFILE%\Documents may not exist at all.
++fs::path KnownFolder(const KNOWNFOLDERID& id)
++{
++  PWSTR path = nullptr;
++  fs::path result;
++  if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &path)))
++    result = path;
++  CoTaskMemFree(path);
++  return result;
++}
++#endif
++
+ fs::path DocumentsDirectory()
+ {
+ #if defined(_WIN32)
++  if (fs::path documents = KnownFolder(FOLDERID_Documents); !documents.empty())
++    return documents;
+   if (const char* user_profile = std::getenv("USERPROFILE"))
+     return fs::path(user_profile) / "Documents";
+ #endif
+@@ -164,6 +208,49 @@ fs::path DocumentsDirectory()
+   return fs::current_path();
+ }
+ 
++fs::path DownloadsDirectory()
++{
++#if defined(_WIN32)
++  if (fs::path downloads = KnownFolder(FOLDERID_Downloads); !downloads.empty())
++    return downloads;
++#endif
++  return DocumentsDirectory().parent_path() / "Downloads";
++}
++
++// The nearest folder that exists, so a file browser never opens on an error.
++fs::path ExistingDirectory(fs::path directory)
++{
++  std::error_code ec;
++  while (!fs::is_directory(directory, ec) && directory.has_relative_path())
++    directory = directory.parent_path();
++  return directory;
++}
++
++// Drive buttons for the file browsers, on the current line: parent_path() stops
++// at C:\, so other drives were out of reach. True when one was picked.
++bool DriveButtons(fs::path* directory)
++{
++  bool picked = false;
++#if defined(_WIN32)
++  const DWORD drives = GetLogicalDrives();
++  for (char letter = 'A'; letter <= 'Z'; ++letter)
++  {
++    if ((drives & (1u << (letter - 'A'))) == 0)
++      continue;
++    const char label[] = {letter, ':', '\0'};
++    ImGui::SameLine();
++    if (ImGui::Button(label))
++    {
++      *directory = fs::path(std::string(label) + "\\");
++      picked = true;
++    }
++  }
++#else
++  (void)directory;
++#endif
++  return picked;
++}
++
+ fs::path ExecutableDirectory(const char* argv0)
+ {
+   std::error_code ec;
+@@ -337,7 +424,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    return output;
  #else
@@ -1991,7 +2099,7 @@ index 7699c3d..a954480 100644
    return std::nullopt;
  #endif
  }
-@@ -464,6 +492,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -464,6 +555,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    fs::rename(staging, output, ec);
    if (ec)
      return fail("can't publish extracted game: " + ec.message());
@@ -1999,7 +2107,7 @@ index 7699c3d..a954480 100644
    std::string error;
    if (!WriteDefaultGame(user_directory, release_directory, output, &error))
      return fail(error);
-@@ -498,12 +527,134 @@ fs::path SiblingRunner(const char* argv0)
+@@ -498,12 +590,134 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -2134,7 +2242,7 @@ index 7699c3d..a954480 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +663,23 @@ int main(int argc, char** argv)
+@@ -512,9 +726,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -2159,7 +2267,7 @@ index 7699c3d..a954480 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +695,12 @@ int main(int argc, char** argv)
+@@ -530,6 +758,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -2172,7 +2280,7 @@ index 7699c3d..a954480 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -547,7 +718,7 @@ int main(int argc, char** argv)
+@@ -547,7 +781,7 @@ int main(int argc, char** argv)
      return 1;
  
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -2181,7 +2289,7 @@ index 7699c3d..a954480 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,6 +727,11 @@ int main(int argc, char** argv)
+@@ -556,6 +790,11 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -2193,7 +2301,7 @@ index 7699c3d..a954480 100644
    SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
    if (!renderer)
      renderer = SDL_CreateRenderer(window, nullptr);
-@@ -571,17 +747,27 @@ int main(int argc, char** argv)
+@@ -571,17 +810,27 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
@@ -2222,7 +2330,7 @@ index 7699c3d..a954480 100644
    bool current_dol_changed = false;
    std::string current_dol_error;
    auto current_metadata =
-@@ -600,8 +786,20 @@ int main(int argc, char** argv)
+@@ -600,8 +849,18 @@ int main(int argc, char** argv)
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
                  config.netplay_nickname.c_str());
@@ -2237,26 +2345,24 @@ index 7699c3d..a954480 100644
 +  std::string mod_folders_game; // Game the list was loaded for.
 +  std::string mod_message;
 +  // Downloaded mods usually sit in ~/Downloads.
-+  fs::path mod_browser_directory = DocumentsDirectory().parent_path() / "Downloads";
-+  if (std::error_code ec; !fs::is_directory(mod_browser_directory, ec))
-+    mod_browser_directory = mod_browser_directory.parent_path();
++  fs::path mod_browser_directory = ExistingDirectory(DownloadsDirectory());
 +  std::vector<fs::path> mod_browser_entries;
 +  bool mod_browser_refresh = true;
    int netplay_port = config.netplay_port;
    bool automatic_buffer = config.netplay_buffer == "auto";
    int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
-@@ -631,6 +829,10 @@ int main(int argc, char** argv)
+@@ -631,6 +890,10 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
-+  fs::path browser_directory = DocumentsDirectory();
++  fs::path browser_directory = ExistingDirectory(DocumentsDirectory());
 +  std::vector<std::pair<fs::path, bool>> browser_entries;
 +  std::string browser_error;
 +  bool browser_refresh = true;
    DialogState dialog;
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -683,15 +885,16 @@ int main(int argc, char** argv)
+@@ -683,15 +946,16 @@ int main(int argc, char** argv)
        }
        selected_controller = configured_controllers.front();
        controller_index = FindController(controllers, selected_controller);
@@ -2278,7 +2384,7 @@ index 7699c3d..a954480 100644
      return select_controller(controller_index);
    };
    const auto refresh_controllers = [&]
-@@ -774,14 +977,18 @@ int main(int argc, char** argv)
+@@ -774,14 +1038,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -2300,7 +2406,7 @@ index 7699c3d..a954480 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1027,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1088,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -2310,7 +2416,7 @@ index 7699c3d..a954480 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1036,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1097,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -2373,7 +2479,7 @@ index 7699c3d..a954480 100644
      }
      else
      {
-@@ -891,6 +1043,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1104,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -2381,7 +2487,7 @@ index 7699c3d..a954480 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1093,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1154,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2416,7 +2522,7 @@ index 7699c3d..a954480 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1152,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1213,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2452,7 +2558,7 @@ index 7699c3d..a954480 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -1005,6 +1205,8 @@ int main(int argc, char** argv)
+@@ -1005,6 +1266,8 @@ int main(int argc, char** argv)
        }
        ImGui::EndCombo();
      }
@@ -2461,7 +2567,7 @@ index 7699c3d..a954480 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,39 +1214,360 @@ int main(int argc, char** argv)
+@@ -1012,39 +1275,362 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -2604,7 +2710,7 @@ index 7699c3d..a954480 100644
 +          if (!kind) {
 +            mod_message = "No mod found in " + folder.filename().string() +
 +                          ": expected tex1_*.dds/.png files or a metadata.json.";
-+          } else if (folder.string().starts_with(load.string() + "/")) {
++          } else if (folder.string().starts_with((load / "").string())) {
 +            mod_message = "That folder is already installed in Dolphin's Load folder.";
 +          } else if (std::ranges::any_of(mod_folders, [&](const auto &mod) {
 +                       return mod.path == folder; })) {
@@ -2624,6 +2730,7 @@ index 7699c3d..a954480 100644
 +        ImGui::SameLine();
 +        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
 +            ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
++        if (DriveButtons(&mod_browser_directory)) mod_browser_refresh = true;
 +        HintText("Open the mod's folder, then press Use this folder.");
 +        if (ImGui::BeginChild("Mod folders", ImVec2(0, 0))) {
 +          for (const fs::path &path : mod_browser_entries) {
@@ -2745,11 +2852,11 @@ index 7699c3d..a954480 100644
 +        }
 +        launch_online(LaunchMode::Join);
 +      }
-+    }
+     }
 +    if (!online_message.empty())
 +      ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%s", online_message.c_str());
 +
-+    ImGui::Spacing();
+     ImGui::Spacing();
 +    if (ImGui::TreeNode("Advanced: LAN / direct IP")) {
 +      HintText("Instead of a room code you can type the host's IP address in the "
 +                          "join field. Direct connections use this UDP port.");
@@ -2763,9 +2870,9 @@ index 7699c3d..a954480 100644
 +      }
 +      HintText("A bigger buffer smooths out lag spikes but adds input delay.");
 +      ImGui::TreePop();
-     }
++    }
 +    ImGui::EndDisabled();
-     ImGui::Spacing();
++    ImGui::Spacing();
 +    }
      ImGui::TextUnformatted("Game disc image");
      if (selected_image)
@@ -2823,6 +2930,7 @@ index 7699c3d..a954480 100644
 +        ImGui::SameLine();
 +        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
 +            ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
++        if (DriveButtons(&browser_directory)) browser_refresh = true;
 +        if (!browser_error.empty()) ImGui::TextWrapped("%s", browser_error.c_str());
 +        if (ImGui::BeginChild("Image files", ImVec2(0, 0))) {
 +          for (std::size_t i = 0; i < browser_entries.size(); ++i) {
@@ -2846,7 +2954,7 @@ index 7699c3d..a954480 100644
        }
        if (selected_image)
        {
-@@ -1090,16 +1613,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1676,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -2918,7 +3026,7 @@ index 7699c3d..a954480 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1696,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1759,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -2929,7 +3037,7 @@ index 7699c3d..a954480 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1201,9 +1783,29 @@ int main(int argc, char** argv)
+@@ -1201,9 +1846,29 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -2961,7 +3069,7 @@ index 7699c3d..a954480 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +1841,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +1904,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -2984,7 +3092,7 @@ index 7699c3d..a954480 100644
            }
            else
            {
-@@ -1266,6 +1871,8 @@ int main(int argc, char** argv)
+@@ -1266,6 +1934,8 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
