@@ -235,6 +235,112 @@ index f9b5405..fb2a63f 100644
          m_impl->automation_state.frame_count.store(info.frame_count,
                                                     std::memory_order_relaxed);
          m_impl->automation_state.present_count.store(info.present_count,
+diff --git a/src/runtime/game.cpp b/src/runtime/game.cpp
+index 85860a5..9d55af1 100644
+--- a/src/runtime/game.cpp
++++ b/src/runtime/game.cpp
+@@ -11,6 +11,18 @@
+ #include <sstream>
+ #include <vector>
+ 
++#if defined(_WIN32) && defined(_MSC_VER)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <bcrypt.h>
++#pragma comment(lib, "bcrypt.lib")
++#endif
++
+ namespace moderngekko
+ {
+ namespace
+@@ -20,10 +32,45 @@ using detail::ReadBE32;
+ 
+ std::optional<std::string> HashFileSha256(const std::filesystem::path& path)
+ {
++#if defined(_WIN32) && defined(_MSC_VER)
++  // Every launch hashes the whole extracted game (about 1.4 GB). CNG uses the
++  // CPU's SHA extensions where present, which made this roughly four times
++  // faster than the portable implementation on a Pentium Silver J5040.
++  std::ifstream file(path, std::ios::binary);
++  if (!file)
++    return std::nullopt;
++  BCRYPT_HASH_HANDLE hash = nullptr;
++  if (!BCRYPT_SUCCESS(BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &hash, nullptr, 0,
++                                       nullptr, 0, 0)))
++    return std::nullopt;
++  std::vector<char> buffer(1 << 20);
++  bool ok = true;
++  while (ok && file)
++  {
++    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
++    const auto count = file.gcount();
++    if (count > 0)
++      ok = BCRYPT_SUCCESS(BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()),
++                                         static_cast<ULONG>(count), 0));
++  }
++  std::array<UCHAR, 32> digest{};
++  ok = ok && file.eof() &&
++       BCRYPT_SUCCESS(BCryptFinishHash(hash, digest.data(),
++                                       static_cast<ULONG>(digest.size()), 0));
++  BCryptDestroyHash(hash);
++  if (!ok)
++    return std::nullopt;
++  std::ostringstream out;
++  out << std::hex << std::setfill('0');
++  for (const auto byte : digest)
++    out << std::setw(2) << static_cast<unsigned>(byte);
++  return out.str();
++#else
+   auto bytes = ReadFileBytes(path);
+   if (!bytes)
+     return std::nullopt;
+   return Sha256(std::move(*bytes));
++#endif
+ }
+ 
+ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root)
+@@ -31,27 +78,27 @@ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root
+   std::error_code ec;
+   if (!std::filesystem::is_directory(root, ec) || ec)
+     return std::nullopt;
+-  std::vector<std::filesystem::path> files;
++  // Relative paths are computed once, lexically: std::filesystem::relative
++  // resolves both paths through the OS, and calling it from the sort
++  // comparator made hashing a game take most of a minute on Windows.
++  std::vector<std::pair<std::string, std::filesystem::path>> files;
+   std::filesystem::recursive_directory_iterator iterator(
+       root, std::filesystem::directory_options::skip_permission_denied, ec);
+   const std::filesystem::recursive_directory_iterator end;
+   while (!ec && iterator != end)
+   {
+     if (iterator->is_regular_file(ec) && !ec)
+-      files.push_back(iterator->path());
++      files.emplace_back(iterator->path().lexically_relative(root).generic_string(),
++                         iterator->path());
+     iterator.increment(ec);
+   }
+   if (ec)
+     return std::nullopt;
+-  std::ranges::sort(files, [&](const auto& left, const auto& right) {
+-    return std::filesystem::relative(left, root).generic_string() <
+-           std::filesystem::relative(right, root).generic_string();
+-  });
++  std::ranges::sort(files, {}, &std::pair<std::string, std::filesystem::path>::first);
+   std::vector<std::uint8_t> manifest;
+-  for (const auto& path : files)
++  for (const auto& [relative, path] : files)
+   {
+-    const std::string relative = std::filesystem::relative(path, root, ec).generic_string();
+-    if (ec)
++    if (relative.empty())
+       return std::nullopt;
+     const auto size = std::filesystem::file_size(path, ec);
+     const auto hash = HashFileSha256(path);
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
 index 6bb9e0e..0d1521f 100644
 --- a/tests/frontend_config_test.cpp
@@ -1641,7 +1747,7 @@ index 0000000..99e2fc5
 +}
 +} // namespace moderngekko::frontend
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..577b5d8 100644
+index 7699c3d..a954480 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,9 +1,13 @@
@@ -1716,7 +1822,7 @@ index 7699c3d..577b5d8 100644
    std::string error;
    if (!WriteDefaultGame(user_directory, release_directory, output, &error))
      return fail(error);
-@@ -498,12 +527,132 @@ fs::path SiblingRunner(const char* argv0)
+@@ -498,12 +527,134 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -1821,7 +1927,9 @@ index 7699c3d..577b5d8 100644
 +    ImGui::Spacing(); ImGui::TextUnformatted(online ? "Leave online session?" : "Exit the game?");
 +    ImGui::TextWrapped("%s", online ? "The session keeps running. Leaving may interrupt other players." : "Progress not saved in-game will be lost. Choose No to resume.");
 +    ImGui::Spacing(); ImGui::BeginDisabled(!armed);
-+    if (newly_armed) ImGui::SetKeyboardFocusHere();
++    // Show the focus on No from the start: ImGui keeps a programmatically set
++    // focus hidden, and a hidden focus ignores Enter / A until a direction is pressed.
++    if (newly_armed) { ImGui::SetKeyboardFocusHere(); ImGui::SetNavCursorVisible(true); }
 +    if (ImGui::Button("No - resume", ImVec2(250,54))) done = true;
 +    ImGui::SameLine();
 +    if (ImGui::Button("Yes - exit", ImVec2(250,54))) { result = 10; done = true; }
@@ -1849,7 +1957,7 @@ index 7699c3d..577b5d8 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +661,23 @@ int main(int argc, char** argv)
+@@ -512,9 +663,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -1874,7 +1982,7 @@ index 7699c3d..577b5d8 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +693,12 @@ int main(int argc, char** argv)
+@@ -530,6 +695,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -1887,7 +1995,7 @@ index 7699c3d..577b5d8 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -547,7 +716,7 @@ int main(int argc, char** argv)
+@@ -547,7 +718,7 @@ int main(int argc, char** argv)
      return 1;
  
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -1896,7 +2004,7 @@ index 7699c3d..577b5d8 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,6 +725,11 @@ int main(int argc, char** argv)
+@@ -556,6 +727,11 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -1908,7 +2016,7 @@ index 7699c3d..577b5d8 100644
    SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
    if (!renderer)
      renderer = SDL_CreateRenderer(window, nullptr);
-@@ -571,17 +745,27 @@ int main(int argc, char** argv)
+@@ -571,17 +747,27 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
@@ -1937,7 +2045,7 @@ index 7699c3d..577b5d8 100644
    bool current_dol_changed = false;
    std::string current_dol_error;
    auto current_metadata =
-@@ -600,8 +784,20 @@ int main(int argc, char** argv)
+@@ -600,8 +786,20 @@ int main(int argc, char** argv)
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
                  config.netplay_nickname.c_str());
@@ -1960,7 +2068,7 @@ index 7699c3d..577b5d8 100644
    int netplay_port = config.netplay_port;
    bool automatic_buffer = config.netplay_buffer == "auto";
    int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
-@@ -631,6 +827,10 @@ int main(int argc, char** argv)
+@@ -631,6 +829,10 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
@@ -1971,7 +2079,7 @@ index 7699c3d..577b5d8 100644
    DialogState dialog;
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -683,15 +883,16 @@ int main(int argc, char** argv)
+@@ -683,15 +885,16 @@ int main(int argc, char** argv)
        }
        selected_controller = configured_controllers.front();
        controller_index = FindController(controllers, selected_controller);
@@ -1993,7 +2101,7 @@ index 7699c3d..577b5d8 100644
      return select_controller(controller_index);
    };
    const auto refresh_controllers = [&]
-@@ -774,14 +975,18 @@ int main(int argc, char** argv)
+@@ -774,14 +977,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -2015,7 +2123,7 @@ index 7699c3d..577b5d8 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1025,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1027,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -2025,7 +2133,7 @@ index 7699c3d..577b5d8 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1034,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1036,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -2088,7 +2196,7 @@ index 7699c3d..577b5d8 100644
      }
      else
      {
-@@ -891,6 +1041,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1043,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -2096,7 +2204,7 @@ index 7699c3d..577b5d8 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1091,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1093,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2131,7 +2239,7 @@ index 7699c3d..577b5d8 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1150,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1152,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2167,7 +2275,7 @@ index 7699c3d..577b5d8 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -1005,6 +1203,8 @@ int main(int argc, char** argv)
+@@ -1005,6 +1205,8 @@ int main(int argc, char** argv)
        }
        ImGui::EndCombo();
      }
@@ -2176,7 +2284,7 @@ index 7699c3d..577b5d8 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,39 +1212,360 @@ int main(int argc, char** argv)
+@@ -1012,39 +1214,360 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -2561,7 +2669,7 @@ index 7699c3d..577b5d8 100644
        }
        if (selected_image)
        {
-@@ -1090,16 +1611,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1613,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -2633,7 +2741,7 @@ index 7699c3d..577b5d8 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1694,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1696,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -2644,7 +2752,7 @@ index 7699c3d..577b5d8 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1201,9 +1781,29 @@ int main(int argc, char** argv)
+@@ -1201,9 +1783,29 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -2676,7 +2784,7 @@ index 7699c3d..577b5d8 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +1839,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +1841,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -2699,7 +2807,7 @@ index 7699c3d..577b5d8 100644
            }
            else
            {
-@@ -1266,6 +1869,8 @@ int main(int argc, char** argv)
+@@ -1266,6 +1871,8 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
@@ -3190,9 +3298,3 @@ index 7ef27ba..0c23f75 100644
    } else {
      std::cerr << "netplay: connecting to " << options.address << ':'
                << options.port << '\n';
-diff --git a/vendor/dolphin b/vendor/dolphin
---- a/vendor/dolphin
-+++ b/vendor/dolphin
-@@ -1 +1 @@
--Subproject commit 10f7ac4fe48f74485fbc161ebf4d67242e11e671
-+Subproject commit 10f7ac4fe48f74485fbc161ebf4d67242e11e671-dirty

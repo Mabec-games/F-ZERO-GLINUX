@@ -3,9 +3,42 @@
 Updated: 2026-10-25.
 
 
-## Latest update — Windows Port Kickoff: Repo Moved, Dolphin Submodules Repaired, Launcher Text, 2026-10-25
+## Latest update — First Windows Build: Launcher, Import and Game Boot Working, 2026-10-25 (overnight)
 
-Goal: port the Linux-only build to Windows. Status: groundwork done, no Windows code or build yet.
+Status: the launcher and runner build with MSVC and F-Zero GX boots and renders on Windows (JIT, Vulkan). No packaging yet. All tests below ran unattended on the user's PC; no physical controller or race was played.
+
+Test PC: Intel Pentium Silver J5040 (4 cores, Intel UHD 605), Windows 11, VS 2022 Build Tools 17.14, CMake 4.4.4, Ninja.
+
+1. Build:
+   - `scripts/build-windows.ps1` = Windows counterpart of `build-glinux.sh`: applies both patches if absent (stops on conflict), finds MSVC through vswhere and imports `vcvars64.bat`, configures with the same branding/GFZE01 options, builds `moderngekko-launcher` + `moderngekko-run`, copies launcher PNGs and Noto fonts to `build\Assets`. Run: `powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1`.
+   - Upstream ModernGekko already supports Windows (PlatformWin32, MSVC flags); the first configure + build of all 1,695 steps passed with no source changes. Output: `lib\ModernGekko\build\ModernGekko.exe`, `moderngekko-run.exe` (static, no DLLs). Full build ~30 min on this CPU.
+   - Saves/config on Windows default to `%LOCALAPPDATA%\fzero-glinux` (upstream logic).
+
+2. Verified on Windows (isolated test profile in Claude's scratchpad, not the user's saves):
+   - Launcher renders with artwork and "F-ZERO GLINUX / FOR LINUX & WINDOWS" footer (`GLINUX_PREVIEW_OUTPUT` capture).
+   - `--extract "F-Zero GX (USA).rvz"` import: 90 s, 1.4 GB, 4,605 files.
+   - Headless JIT boot (Null gfx/audio): first presented frame at 24 s.
+   - Windowed Vulkan: first run compiles 181 shaders (~4 min on UHD 605); cached run reaches the memory-card prompt in 58 s at 41-45 FPS (menus; race FPS not measured — this CPU is far below the Linux test machine).
+   - Escape opens the Quit dialog (game pauses); No resumes; Yes (mouse, or Right+Enter) exits the runner cleanly.
+
+3. Fixes made for Windows (exported to both patch files, reverse-checks pass):
+   - `PlatformWin32.cpp`: Escape now calls `ConfirmExit()` like X11/Wayland (upstream: Escape left fullscreen or quit immediately with no prompt). F11 still toggles fullscreen.
+   - `game.cpp` `HashDirectorySha256`: the sort comparator called `std::filesystem::relative` (OS path resolution) O(n log n) times; now relative paths are computed once with `lexically_relative`. Same hash (`7df46c61…502e15` for the user's files/), 52.7 s -> 20 s.
+   - `game.cpp` `HashFileSha256` (MSVC only): streams the file through Windows CNG/BCrypt (uses SHA-NI) instead of loading it whole into the portable SHA-256: 20 s -> ~10 s, same hash. `InspectGame` hashes the whole 1.4 GB game at launcher start and twice per runner start (runner + `Runtime::Create`), so this was ~105 s of blank wait before boot.
+   - Quit dialog: `SetKeyboardFocusHere` leaves ImGui's nav cursor hidden, and a hidden cursor ignores Enter/Space/gamepad A until a direction is pressed, so pressing Enter/A immediately did nothing and No was not highlighted. Added `ImGui::SetNavCursorVisible(true)`; No is now highlighted cyan and Enter/Space/Escape/Right+Enter/Right+Left+Enter all verified with real key events. Affects Linux too (same code).
+   - Test note: PowerShell `SendKeys` arrows lack the extended-key flag, so SDL sees keypad keys; use `keybd_event` with `KEYEVENTF_EXTENDEDKEY` for synthetic arrow tests.
+
+4. Known Windows gaps / next steps:
+   - Launch still hashes the game 3x (~30 s total on this PC). Cache the asset hash (e.g. keyed on file count/sizes/mtimes) or pass the launcher's metadata to the runner.
+   - Game window title-bar icon is the default warning triangle and the Dolphin Win32 window shows a File/View menu bar; no app icon/resource yet.
+   - Physical gamepad, audio (cubeb/WASAPI), fullscreen, D3D11/D3D12 backends and netplay untested on Windows. Default backend is Vulkan (`moderngekko_run.cpp`); consider D3D11 as the Windows default for weak/odd GPUs.
+   - Packaging: Windows zip (exe + Sys + Assets + licenses) and maybe an installer; a Windows CI job.
+   - The lib/ModernGekko nested submodules libusb, miniupnp and zstd show as dirty: symlinks/line endings mangled by the USB copy. Harmless for building; ignore (`--ignore-submodules` when exporting patches).
+
+
+## Previous update — Windows Port Kickoff: Repo Moved, Dolphin Submodules Repaired, Launcher Text, 2026-10-25
+
+Goal: port the Linux-only build to Windows. Status at the time: groundwork done, no Windows code or build yet.
 
 1. Project location moved to `C:\dev\fzero-gx-linux`:
    - The old copy under `Downloads\fzero-gx-linux\...\F-ZERO-GLINUX-windows-port-20261025\fzero-gx-linux` was too deep: nested submodule git dirs (e.g. `.git/modules/.../cubeb/cubeb/modules/cmake/sanitizers-cmake`, 266 chars) exceeded the Windows 260-char limit, so Git reported `fatal: not a git repository` even with `core.longpaths=true` (a `subst` drive does not help, Git resolves it back to the long path).

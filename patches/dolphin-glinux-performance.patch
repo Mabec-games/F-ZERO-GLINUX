@@ -383,6 +383,27 @@ index f7e1ca2..2ae49aa 100644
    }
    else if (symbol == XKB_KEY_F10)
    {
+diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+index 3402fda..3e3b455 100644
+--- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
++++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+@@ -381,14 +381,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+       platform->ToggleFullscreen();
+       return 0;
+     }
+-    else if (wParam == VK_ESCAPE && platform->m_fullscreen)
+-    {
+-      platform->ToggleFullscreen();
+-      return 0;
+-    }
+     else if (wParam == VK_ESCAPE)
+     {
+-      platform->RequestShutdown();
++      platform->ConfirmExit();
++      return 0;
+     }
+     break;
+ 
 diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
 index 8d0ae0c..0e01bb2 100644
 --- a/Source/Core/DolphinNoGUI/PlatformX11.cpp
