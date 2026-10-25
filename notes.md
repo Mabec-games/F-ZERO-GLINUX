@@ -3,7 +3,15 @@
 Updated: 2026-10-25.
 
 
-## Latest update — First Windows Build: Launcher, Import and Game Boot Working, 2026-10-25 (overnight)
+## Latest update — Release 0.9 (Linux + Windows, automatic unlocks), 2026-10-25
+
+- Tag `v0.9` on the public repo, built from the Windows commits (d0d5312) plus README/CI changes. Assets: CI AppImage `F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage`, local Flatpak `F-ZERO-GLINUX-0.9-x86_64.flatpak`, and the Windows zip built on the user's PC (`F-ZERO-GLINUX-preview-20261025-windows-x64.zip`, uploaded as `F-ZERO-GLINUX-0.9-windows-x64.zip`; its inner folder keeps the preview name).
+- CI: on `v*` tags the AppImage is now named after the tag (`GLINUX_VERSION=${GITHUB_REF_NAME#v}`).
+- Flatpak check: `flatpak build --runtime --env=MODERNGEKKO_STATICRECOMP=0` on `build/flatpak/app`, headless Null boot on a profile copy with cheats on, RAM read after 1500 frames: po=0x801ba860, tickets 99999, cups 0xfc000000, machines 0x1ff/0xffffffff, parts 0xffffffff/0xffffffff/0x7ff, songs 0x5, exit 0. The songs bit is set in RAM; the Items screen itself is still unchecked.
+- README: new "Unlock everything" section, 0.9 filenames, AppImage glibc 2.35 wording, fixed the `%LOCALAPPDATA%\fzero-glinux` path.
+
+
+## Previous update — First Windows Build: Launcher, Import and Game Boot Working, 2026-10-25 (overnight)
 
 Status: the launcher and runner build with MSVC; F-Zero GX boots, renders and quits cleanly on Windows (JIT, Direct3D 11 default); a portable zip package builds. Linux CI (AppImage build + Ubuntu 22.04/24.04, Debian 12, Fedora 40 smoke tests) passed on every shared-code change (runs 40149051610, 40151394044). All tests below ran unattended on the user's PC; no physical controller or race was played.
 

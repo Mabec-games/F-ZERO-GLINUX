@@ -7,6 +7,7 @@
 <p align="center">
   <a href="#choose-your-package">AppImage, Flatpak & Windows</a> ·
   <a href="#start-playing">Start playing</a> ·
+  <a href="#unlock-everything">Unlockables</a> ·
   <a href="#mods--hd-textures">Mods</a> ·
   <a href="#play-online">Play online</a> ·
   <a href="#build-from-source">Build from source</a> ·
@@ -33,6 +34,8 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
+- **Unlock everything:** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part and shop song, with no button codes.
+- **Windows build:** a portable zip for Windows 10/11, with the same launcher and features.
 
 The current target is the game's normal **60 FPS** operation.
 Performance and available AA modes depend on your hardware.
@@ -41,6 +44,37 @@ Performance and available AA modes depend on your hardware.
   <img src="docs/images/race-finish.png" alt="A first-place finish in F-ZERO GX" width="100%">
   <br><em>Alright, First place!</em>
 </p>
+
+## Unlock everything
+
+Open **CHEATS & UNLOCKS** in the launcher and switch on
+**Unlock Everything & Max Tickets (99,999)**. The unlocks are applied automatically
+every time the game starts; there are no button codes to enter:
+
+- **99,999 tickets** to spend in the F-Zero Shop.
+- **All cups**, including the **AX Cup** and its tracks.
+- **Every machine**, including the AX machines and **Dark Schneider**.
+- **Every custom part**, including the **15 Gold Parts** from the hidden shop codes
+  discovered in 2026. They are listed under F-Zero Shop > Custom Parts at
+  15 tickets each, under their part names:
+
+  | Gold machine | Body | Cockpit | Booster |
+  |---|---|---|---|
+  | Thunderstorm | Rage Knight | Hyper Stream | Velocity -J |
+  | El Dorado | Metal Shell | Round Disk | Shuttle -M2 |
+  | Chrono Symphony | Blood Raven | Maximum Star | Crown -77 |
+  | Bahamut | Mad Bull | Crazy Buffalo | Mars -EX |
+  | Gladiator | Galaxy Falcon | Rush Cyclone | Hornet -FX |
+
+  Buy the three parts, then assemble them as a new machine in the **Garage**.
+- **Sounds of MUTE CITY** and **Sounds of BIG BLUE** for sale under F-Zero Shop >
+  Items (99 tickets). Press **Z** when choosing a Mute City or Big Blue course to
+  race with the remix; the normal music stays.
+
+Unlocked content is written to your memory card the next time the game saves, so
+it stays after the switch is turned off. Back up your save first if you want to
+keep an untouched one. The original button codes are still listed in the launcher,
+and the Gold Parts codes work with a single controller.
 
 ## Mods & HD textures
 
@@ -90,7 +124,7 @@ multiplayer:
 |---|---|---|
 | Start | Make executable, then open the file | Install once, then open from your app menu |
 | Dependencies | Bundled libraries plus the host's base system | Application built inside a matching Freedesktop SDK; uses its Platform runtime |
-| Current compatibility | Local preview requires **glibc 2.44+ and x86-64-v3** | Avoids that host-glibc dependency by using Freedesktop **26.08** |
+| Current compatibility | Release build requires **glibc 2.35+** (Ubuntu 22.04, Debian 12 or newer) | Avoids that host-glibc dependency by using Freedesktop **26.08** |
 | Best fit | Compatible, recent Linux systems; portable single-file launch | The preferred candidate for older distros and Bazzite testing |
 | Game import | Browse to your own ISO/RVZ | Put the ISO/RVZ in Downloads, which the sandbox can read |
 | Save location | `~/.local/share/fzero-glinux` by default | `~/.var/app/io.github.mabecgames.FZeroGLinux/data/fzero-glinux` |
@@ -99,28 +133,29 @@ The two packages keep separate profiles. Switching package formats does not
 automatically transfer your saves.
 
 **Windows** (10/11, x64) uses a portable zip: unpack it anywhere and run it, no
-installer or extra runtime needed. Saves are stored in `%LOCALAPPDATA%zero-glinux`.
+installer or extra runtime needed. Saves are stored in `%LOCALAPPDATA%\fzero-glinux`.
 
 ## Start playing
 
-The filenames below refer to the current preview artifacts. When building locally,
+The filenames below are those of the **v0.9** release. When building locally,
 find them in `dist/`. See [Releases](https://github.com/Mabec-games/F-ZERO-GLINUX/releases)
 for any published downloads; source publication does not automatically publish binaries.
 
 ### AppImage
 
 ```bash
-chmod +x F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage
-./F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage
+chmod +x F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage
+./F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage
 ```
 
 If FUSE is unavailable, run:
 
 ```bash
-./F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage --appimage-extract-and-run
+./F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage --appimage-extract-and-run
 ```
 
-This particular AppImage cannot run on hosts with glibc older than 2.44.
+The release AppImage is smoke-tested on Ubuntu 22.04 and 24.04, Debian 12 and
+Fedora 40. Builds made on a newer host can need a newer glibc.
 See [AppImage packaging and compatibility](packaging/README.md).
 
 ### Flatpak
@@ -128,7 +163,7 @@ See [AppImage packaging and compatibility](packaging/README.md).
 With Flatpak and the Flathub remote available:
 
 ```bash
-flatpak install --user ./F-ZERO-GLINUX-x86_64.flatpak
+flatpak install --user ./F-ZERO-GLINUX-0.9-x86_64.flatpak
 flatpak run io.github.mabecgames.FZeroGLinux
 ```
 
@@ -142,7 +177,7 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 
 ### Windows
 
-1. Download `F-ZERO-GLINUX-preview-20261025-windows-x64.zip` and unpack it to any folder.
+1. Download `F-ZERO-GLINUX-0.9-windows-x64.zip` and unpack it to any folder.
 2. Run `F-ZERO GLINUX.exe`. If SmartScreen warns about an unknown publisher,
    choose **More info → Run anyway**; the preview is not code-signed.
 
@@ -227,6 +262,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
 | Mods | HD texture packs and Dolphin graphics mods from any folder |
+| Unlockables | Automatic; tickets, cups, machines and Gold Parts confirmed in game, shop songs not yet checked |
 
 Report problems with your package type, distro, graphics backend, GPU and gamepad,
 along with the relevant log. 

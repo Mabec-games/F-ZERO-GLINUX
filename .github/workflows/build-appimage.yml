@@ -59,6 +59,10 @@ jobs:
 
       - name: Package AppImage
         run: |
+          # Release tags name the AppImage after the version, e.g. v0.9 -> 0.9.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export GLINUX_VERSION="${GITHUB_REF_NAME#v}"
+          fi
           bash scripts/package-appimage.sh
 
       - name: Verify AppImage compatibility
