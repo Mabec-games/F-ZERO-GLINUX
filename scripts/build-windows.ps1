@@ -38,7 +38,7 @@ if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
 }
 
 $build = "$root\lib\ModernGekko\build"
-$extra = if ($env:GLINUX_CMAKE_ARGS) { $env:GLINUX_CMAKE_ARGS -split ' ' } else { @() }
+$extra = @(if ($env:GLINUX_CMAKE_ARGS) { $env:GLINUX_CMAKE_ARGS -split ' ' })
 cmake -S lib/ModernGekko -B $build -G Ninja `
     -DCMAKE_BUILD_TYPE=Release `
     -DBUILD_TESTING=OFF `

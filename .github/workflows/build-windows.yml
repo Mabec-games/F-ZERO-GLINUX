@@ -34,14 +34,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Build F-ZERO GLINUX and run Windows unit tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $env:GLINUX_CMAKE_ARGS = "-DBUILD_TESTING=ON"
-          powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+          & .\scripts\build-windows.ps1
           if ($LASTEXITCODE -ne 0) { throw "scripts\build-windows.ps1 failed." }
 
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
