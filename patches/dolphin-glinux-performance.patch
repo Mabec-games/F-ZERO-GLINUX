@@ -87,6 +87,21 @@ index c121351..7f31cde 100644
  
      Host_TitleChanged();
  
+diff --git a/Source/Core/Core/Core.cpp b/Source/Core/Core/Core.cpp
+index e58579e..12a8fd0 100644
+--- a/Source/Core/Core/Core.cpp
++++ b/Source/Core/Core/Core.cpp
+@@ -905,8 +905,8 @@ void UpdateInputGate(bool require_focus, bool require_full_focus)
+ {
+   // If the user accepts background input, controls should pass even if an on screen interface is on
+   const bool focus_passes =
+-      !require_focus ||
+-      ((Host_RendererHasFocus() || Host_TASInputHasFocus()) && !Host_UIBlocksControllerState());
++      !Host_UIBlocksControllerState() &&
++      (!require_focus || Host_RendererHasFocus() || Host_TASInputHasFocus());
+   // Ignore full focus if we don't require basic focus
+   const bool full_focus_passes =
+       !require_focus || !require_full_focus || (focus_passes && Host_RendererHasFullFocus());
 diff --git a/Source/Core/Core/Host.h b/Source/Core/Core/Host.h
 index 5763950..f08e7bc 100644
 --- a/Source/Core/Core/Host.h
@@ -384,7 +399,7 @@ index f7e1ca2..2ae49aa 100644
    else if (symbol == XKB_KEY_F10)
    {
 diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
-index 3402fda..08bf398 100644
+index 3402fda..b2689bc 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 @@ -11,10 +11,12 @@
@@ -416,14 +431,15 @@ index 3402fda..08bf398 100644
    void UpdateWindowPosition();
    void ProcessEvents();
  
-@@ -77,8 +81,13 @@ private:
+@@ -77,8 +81,14 @@ private:
    std::vector<std::string> m_load_state_paths;
    std::time_t m_last_save_time{};
    std::size_t m_save_sequence{};
 -  bool m_fullscreen = false;
    LONG m_windowed_style = 0;
 +  LONG m_windowed_ex_style = 0;
-+  // Start-up fullscreen, entered from MainLoop: see Init.
++  // Start-up focus and fullscreen, entered from MainLoop: see Init.
++  bool m_focus_pending = true;
 +  bool m_fullscreen_pending = false;
 +  u64 m_fullscreen_resize_at = 0;
 +  std::atomic<u64> m_present_count{0};
@@ -431,7 +447,7 @@ index 3402fda..08bf398 100644
    RECT m_windowed_rect{};
  
    int m_window_x = Config::Get(Config::MAIN_RENDER_WINDOW_XPOS);
-@@ -90,7 +99,13 @@ private:
+@@ -90,7 +100,13 @@ private:
  PlatformWin32::~PlatformWin32()
  {
    if (m_hwnd)
@@ -445,7 +461,7 @@ index 3402fda..08bf398 100644
  }
  
  bool PlatformWin32::RegisterRenderWindowClass()
-@@ -102,12 +117,14 @@ bool PlatformWin32::RegisterRenderWindowClass()
+@@ -102,12 +118,14 @@ bool PlatformWin32::RegisterRenderWindowClass()
    wc.cbClsExtra = 0;
    wc.cbWndExtra = 0;
    wc.hInstance = GetModuleHandle(nullptr);
@@ -462,7 +478,7 @@ index 3402fda..08bf398 100644
  
    if (!RegisterClassEx(&wc))
    {
-@@ -120,7 +137,9 @@ bool PlatformWin32::RegisterRenderWindowClass()
+@@ -120,7 +138,9 @@ bool PlatformWin32::RegisterRenderWindowClass()
  
  bool PlatformWin32::CreateRenderWindow()
  {
@@ -473,7 +489,7 @@ index 3402fda..08bf398 100644
                            m_window_x < 0 ? CW_USEDEFAULT : m_window_x,
                            m_window_y < 0 ? CW_USEDEFAULT : m_window_y, m_window_width,
                            m_window_height, nullptr, nullptr, GetModuleHandle(nullptr), this);
-@@ -177,7 +196,7 @@ void PlatformWin32::RefreshMenu(const HMENU menu)
+@@ -177,7 +197,7 @@ void PlatformWin32::RefreshMenu(const HMENU menu)
                    MF_BYCOMMAND |
                        (Config::Get(Config::MAIN_AUDIO_MUTED) ? MF_CHECKED : MF_UNCHECKED));
      CheckMenuItem(m_view_menu, ID_FULLSCREEN,
@@ -482,7 +498,7 @@ index 3402fda..08bf398 100644
      return;
    }
  
-@@ -231,10 +250,11 @@ void PlatformWin32::SaveStateToStatesDirectory()
+@@ -231,10 +251,11 @@ void PlatformWin32::SaveStateToStatesDirectory()
  
  void PlatformWin32::ToggleFullscreen()
  {
@@ -495,7 +511,7 @@ index 3402fda..08bf398 100644
  
      MONITORINFO monitor{};
      monitor.cbSize = sizeof(monitor);
-@@ -243,21 +263,25 @@ void PlatformWin32::ToggleFullscreen()
+@@ -243,21 +264,29 @@ void PlatformWin32::ToggleFullscreen()
  
      SetMenu(m_hwnd, nullptr);
      SetWindowLong(m_hwnd, GWL_STYLE, m_windowed_style & ~WS_OVERLAPPEDWINDOW);
@@ -507,6 +523,8 @@ index 3402fda..08bf398 100644
                   monitor.rcMonitor.bottom - monitor.rcMonitor.top,
                   SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 -    m_fullscreen = true;
++    SetForegroundWindow(m_hwnd);
++    SetFocus(m_hwnd);
 +    m_window_fullscreen = true;
      return;
    }
@@ -519,30 +537,34 @@ index 3402fda..08bf398 100644
                 m_windowed_rect.bottom - m_windowed_rect.top,
                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_NOZORDER);
 -  m_fullscreen = false;
++  SetForegroundWindow(m_hwnd);
++  SetFocus(m_hwnd);
 +  m_window_fullscreen = false;
  }
  
  bool PlatformWin32::Init()
-@@ -265,10 +289,15 @@ bool PlatformWin32::Init()
+@@ -265,11 +294,15 @@ bool PlatformWin32::Init()
    if (!RegisterRenderWindowClass() || !CreateRenderWindow() || !CreateMenus())
      return false;
  
 -  // TODO: Enter fullscreen if enabled.
 -  if (Config::Get(Config::MAIN_FULLSCREEN))
-+  // Entered from MainLoop once frames are being shown, like pressing F11:
-+  // before the first frame Vulkan left the window white or black.
-+  m_fullscreen_pending = Config::Get(Config::MAIN_FULLSCREEN);
-+  if (m_fullscreen_pending)
-   {
+-  {
 -    ProcessEvents();
-+    m_present_hook =
-+        GetVideoEvents().after_present_event.Register([this](const PresentInfo& info) {
-+          m_present_count.store(info.present_count, std::memory_order_relaxed);
-+        });
-   }
+-  }
++  // Entered from MainLoop once frames are being shown, like pressing F11:
++  // before the first frame Vulkan left the window white or black. Also claim
++  // foreground focus once the launcher hides its loading window after frame 1.
++  m_focus_pending = true;
++  m_fullscreen_pending = Config::Get(Config::MAIN_FULLSCREEN);
++  m_present_hook =
++      GetVideoEvents().after_present_event.Register([this](const PresentInfo& info) {
++        m_present_count.store(info.present_count, std::memory_order_relaxed);
++      });
  
    if (Config::Get(Config::MAIN_DISABLE_SCREENSAVER))
-@@ -289,6 +318,7 @@ void PlatformWin32::MainLoop()
+     SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
+@@ -289,6 +322,7 @@ void PlatformWin32::MainLoop()
    {
      UpdateRunningFlag();
      Core::HostDispatchJobs(Core::System::GetInstance());
@@ -550,7 +572,7 @@ index 3402fda..08bf398 100644
      ProcessEvents();
      UpdateWindowPosition();
  
-@@ -297,6 +327,38 @@ void PlatformWin32::MainLoop()
+@@ -297,6 +331,54 @@ void PlatformWin32::MainLoop()
    }
  }
  
@@ -560,6 +582,17 @@ index 3402fda..08bf398 100644
 +    return;
 +
 +  const u64 presents = m_present_count.load(std::memory_order_relaxed);
++  if (m_focus_pending && presents >= 2)
++  {
++    m_focus_pending = false;
++    SetForegroundWindow(m_hwnd);
++    SetFocus(m_hwnd);
++    if (!m_fullscreen_pending)
++    {
++      m_present_hook = {};
++      return;
++    }
++  }
 +  if (m_fullscreen_pending && presents >= 60)
 +  {
 +    m_fullscreen_pending = false;
@@ -567,8 +600,11 @@ index 3402fda..08bf398 100644
 +    // F11 may already have been pressed during the boot.
 +    if (!m_window_fullscreen)
 +      ToggleFullscreen();
++    SetForegroundWindow(m_hwnd);
++    SetFocus(m_hwnd);
 +  }
-+  else if (!m_fullscreen_pending && presents >= m_fullscreen_resize_at)
++  else if (!m_fullscreen_pending && m_fullscreen_resize_at > 0 &&
++           presents >= m_fullscreen_resize_at)
 +  {
 +    // This early in the boot Vulkan can keep the windowed size after entering
 +    // fullscreen, leaving white strips on the right and bottom. Another resize
@@ -582,6 +618,8 @@ index 3402fda..08bf398 100644
 +                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER);
 +    SetWindowPos(m_hwnd, nullptr, 0, 0, width, height,
 +                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER);
++    SetForegroundWindow(m_hwnd);
++    SetFocus(m_hwnd);
 +    m_present_hook = {};
 +  }
 +}
@@ -589,7 +627,7 @@ index 3402fda..08bf398 100644
  WindowSystemInfo PlatformWin32::GetWindowSystemInfo() const
  {
    WindowSystemInfo wsi;
-@@ -381,14 +443,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -381,14 +463,15 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
        platform->ToggleFullscreen();
        return 0;
      }
@@ -602,11 +640,16 @@ index 3402fda..08bf398 100644
      {
 -      platform->RequestShutdown();
 +      platform->ConfirmExit();
++      if (platform->IsRunning())
++      {
++        SetForegroundWindow(hwnd);
++        SetFocus(hwnd);
++      }
 +      return 0;
      }
      break;
  
-@@ -403,7 +461,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+@@ -403,7 +486,8 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
    case WM_KILLFOCUS:
      // Never leave emulation running fast because Space was released while
      // another window had focus and the key-up went elsewhere.
@@ -617,10 +660,34 @@ index 3402fda..08bf398 100644
  
    case WM_SYSKEYDOWN:
 diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
-index 8d0ae0c..0e01bb2 100644
+index 8d0ae0c..c9f7b88 100644
 --- a/Source/Core/DolphinNoGUI/PlatformX11.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformX11.cpp
-@@ -192,9 +192,9 @@ void PlatformX11::ProcessEvents()
+@@ -96,14 +96,21 @@ bool PlatformX11::Init()
+   pid_t pid = getpid();
+   XChangeProperty(m_display, m_window, XInternAtom(m_display, "_NET_WM_PID", False), XA_CARDINAL,
+                   32, PropModeReplace, reinterpret_cast<unsigned char*>(&pid), 1);
++  XTextProperty wmClientMachine;
+   char host_name[HOST_NAME_MAX] = "";
+   if (!gethostname(host_name, sizeof(host_name)))
+   {
+-    XTextProperty wmClientMachine = {reinterpret_cast<unsigned char*>(host_name), XA_STRING, 8,
+-                                     strlen(host_name)};
++    wmClientMachine = {reinterpret_cast<unsigned char*>(host_name), XA_STRING, 8,
++                       strlen(host_name)};
+     XSetWMClientMachine(m_display, m_window, &wmClientMachine);
+   }
++  XWMHints wmHints{};
++  wmHints.flags = InputHint | StateHint;
++  wmHints.input = True;
++  wmHints.initial_state = NormalState;
++  XSetWMHints(m_display, m_window, &wmHints);
+   XMapRaised(m_display, m_window);
++  XSetInputFocus(m_display, m_window, RevertToParent, CurrentTime);
+   XFlush(m_display);
+   XSync(m_display, True);
+   ProcessEvents();
+@@ -192,9 +199,9 @@ void PlatformX11::ProcessEvents()
      {
      case KeyPress:
        key = XLookupKeysym((XKeyEvent*)&event, 0);

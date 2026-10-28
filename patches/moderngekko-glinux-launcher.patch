@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c0548a0..de20cba 100644
+index c0548a0..dff99fe 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -46,10 +46,14 @@ option(MODERNGEKKO_PORTABLE_DEFAULT_GAME
@@ -95,8 +95,22 @@ index c0548a0..de20cba 100644
      # Header-only, so the test needs no companion translation unit.
      add_executable(moderngekko_launcher_savestates_test
          tests/launcher_savestates_test.cpp)
+@@ -703,9 +741,11 @@ if(BUILD_TESTING)
+ 
+     add_executable(moderngekko_frontend_config_gamecube_test
+         tests/frontend_config_test.cpp
+-        tools/frontend_config.cpp)
++        tools/frontend_config.cpp
++        tools/graphics_mods.cpp)
+     target_include_directories(moderngekko_frontend_config_gamecube_test PRIVATE
+-        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
++        "${CMAKE_CURRENT_SOURCE_DIR}/tools"
++        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/picojson")
+     target_compile_features(moderngekko_frontend_config_gamecube_test PRIVATE cxx_std_23)
+     target_compile_definitions(moderngekko_frontend_config_gamecube_test PRIVATE
+         MODERNGEKKO_GAMECUBE_CONTROLLERS=1)
 diff --git a/include/moderngekko/runtime.hpp b/include/moderngekko/runtime.hpp
-index 0adc855..0cf113f 100644
+index 0adc855..404ec79 100644
 --- a/include/moderngekko/runtime.hpp
 +++ b/include/moderngekko/runtime.hpp
 @@ -4,6 +4,7 @@
@@ -122,6 +136,15 @@ index 0adc855..0cf113f 100644
  };
  
  struct AudioSettings
+@@ -42,7 +51,7 @@ struct AudioSettings
+ 
+ struct InputSettings
+ {
+-  bool background_input = false;
++  bool background_input = true;
+ };
+ 
+ struct AutomationSettings
 @@ -59,6 +68,8 @@ enum class WindowSystem
  
  struct RuntimeConfig
@@ -474,10 +497,18 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..4054792 100644
+index 6bb9e0e..c6a11eb 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
-@@ -21,6 +21,42 @@ int main() {
+@@ -1,4 +1,7 @@
+ #include "frontend_config.hpp"
++#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
++#include "graphics_mods.hpp"
++#endif
+ 
+ #include <chrono>
+ #include <filesystem>
+@@ -21,6 +24,42 @@ int main() {
             std::chrono::steady_clock::now().time_since_epoch().count()));
  
    std::string error;
@@ -520,7 +551,7 @@ index 6bb9e0e..4054792 100644
    const std::string controller = "SDL/0/Test Controller";
    if (!moderngekko::frontend::SaveConfig(directory, "1920x1080", false,
                                           controller, &error))
-@@ -29,10 +65,59 @@ int main() {
+@@ -29,10 +68,59 @@ int main() {
    const auto loaded = moderngekko::frontend::LoadConfig(directory, false);
    if (!loaded || loaded.dolphin_scale != 3 || loaded.show_fps_in_title ||
        loaded.controller != controller ||
@@ -581,7 +612,7 @@ index 6bb9e0e..4054792 100644
    moderngekko::frontend::ConfigResult netplay_config = loaded;
    netplay_config.graphics_backend = "OpenGL";
    netplay_config.fullscreen = true;
-@@ -89,7 +174,7 @@ int main() {
+@@ -89,7 +177,7 @@ int main() {
    }
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
    if (!generated.contains("Buttons/A = `Button A`\n") ||
@@ -590,7 +621,7 @@ index 6bb9e0e..4054792 100644
        !generated.contains("Main Stick/Up = `Left Y+`\n") ||
        !generated.contains("C-Stick/Up = `Right Y+`\n") ||
        !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
-@@ -114,6 +199,31 @@ int main() {
+@@ -114,6 +202,31 @@ int main() {
  #endif
  
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
@@ -622,7 +653,7 @@ index 6bb9e0e..4054792 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +248,105 @@ int main() {
+@@ -138,6 +251,160 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -725,6 +756,61 @@ index 6bb9e0e..4054792 100644
 +    }
 +  }
 +
++#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
++  // Keyboard profile X/Y swap (C / S) via SetBoostLayout.
++  {
++    auto kb_cfg = netplay_config;
++    kb_cfg.boost_on_x = false;
++    const std::vector<std::string> kb_devs = {
++        std::string(moderngekko::frontend::KEYBOARD_DEVICE)};
++    if (!moderngekko::frontend::SaveConfig(directory, kb_cfg, &error) ||
++        !moderngekko::frontend::GenerateControllerConfig(directory, kb_devs, &error))
++      return 94;
++    if (!read_profile().contains("Buttons/X = `C`\nButtons/Y = `S`\n"))
++      return 95;
++    if (!moderngekko::frontend::SetBoostLayout(directory, true, &error) ||
++        !read_profile().contains("Buttons/X = `S`\nButtons/Y = `C`\n"))
++      return 96;
++    if (!moderngekko::frontend::SetBoostLayout(directory, false, &error) ||
++        !read_profile().contains("Buttons/X = `C`\nButtons/Y = `S`\n"))
++      return 97;
++  }
++
++  // Texture pack linking (symlink or NTFS directory junction on Windows without admin).
++  {
++    const fs::path ext_tex = directory / "ExternalTexPack";
++    fs::create_directories(ext_tex);
++    {
++      std::ofstream tex(ext_tex / "tex1_128x128_deadbeef.png");
++      tex << "png";
++    }
++    if (moderngekko::frontend::DetectModKind(ext_tex) !=
++        moderngekko::frontend::ModKind::TexturePack)
++      return 98;
++    std::vector<moderngekko::frontend::ModFolder> mods = {
++        {.path = ext_tex,
++         .kind = moderngekko::frontend::ModKind::TexturePack,
++         .enabled = true}};
++    bool tex_active = false, gfx_active = false;
++    if (!moderngekko::frontend::SaveModFolders(directory, mods, &error) ||
++        !moderngekko::frontend::ApplyModFolders(directory, "GFZE01", mods,
++                                                &tex_active, &gfx_active, &error) ||
++        !tex_active || gfx_active)
++      return 99;
++    // Linked folder in Load/Textures/GFZE01 must not be misclassified as hand-installed.
++    const auto reloaded_mods =
++        moderngekko::frontend::LoadModFolders(directory, "GFZE01");
++    if (reloaded_mods.size() != 1 || reloaded_mods[0].in_load_folder)
++      return 100;
++    // Disabling the mod removes the link cleanly while keeping the source file intact.
++    mods[0].enabled = false;
++    if (!moderngekko::frontend::ApplyModFolders(directory, "GFZE01", mods,
++                                                &tex_active, &gfx_active, &error) ||
++        tex_active || !fs::exists(ext_tex / "tex1_128x128_deadbeef.png"))
++      return 101;
++  }
++#endif
++
    fs::remove_all(directory);
    return 0;
  }
@@ -785,7 +871,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..c668766 100644
+index 03740d4..7f45d29 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1023,7 +1109,7 @@ index 03740d4..c668766 100644
    return true;
  }
  
-@@ -336,6 +443,55 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +443,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -1045,17 +1131,24 @@ index 03740d4..c668766 100644
 +    const auto key = equals == std::string::npos ? "" : Trim(trimmed.substr(0, equals));
 +    if (pad && (key == "Buttons/X" || key == "Buttons/Y")) {
 +      const auto value = Trim(trimmed.substr(equals + 1));
-+      if (value != "`Button X`" && value != "`Button Y`") {
++      const bool gamepad_xy = (value == "`Button X`" || value == "`Button Y`");
++      const bool keyboard_cs = (value == "`C`" || value == "`S`");
++      if (!gamepad_xy && !keyboard_cs) {
 +        if (error) *error = "Custom X/Y bindings detected; edit those manually or generate a standard profile.";
 +        return false;
 +      }
 +      const bool is_x = key == "Buttons/X";
 +      if (is_x) ++x_count; else ++y_count;
-+      line = key + " = `Button " + ((is_x != enabled) ? "X`" : "Y`");
++      if (gamepad_xy)
++        line = key + " = `Button " + ((is_x != enabled) ? "X`" : "Y`");
++      else
++        line = key + " = `" + ((is_x != enabled) ? "C`" : "S`");
 +    }
 +    result += line + '\n';
 +  }
-+  if (input.bad() || x_count == 0 || x_count != y_count) {
++  const bool input_bad = input.bad();
++  input.close();
++  if (input_bad || x_count == 0 || x_count != y_count) {
 +    if (error) *error = "Incomplete GameCube X/Y bindings; profile was not changed.";
 +    return false;
 +  }
@@ -1079,7 +1172,7 @@ index 03740d4..c668766 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +528,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +535,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -1154,7 +1247,7 @@ index 03740d4..c668766 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +694,228 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +701,228 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -1478,18 +1571,27 @@ index 3b18d05..f7708cf 100644
  } // namespace moderngekko::frontend
 diff --git a/tools/graphics_mods.cpp b/tools/graphics_mods.cpp
 new file mode 100644
-index 0000000..b89c5f2
+index 0000000..1246049
 --- /dev/null
 +++ b/tools/graphics_mods.cpp
-@@ -0,0 +1,324 @@
+@@ -0,0 +1,438 @@
 +#include "graphics_mods.hpp"
 +
 +#include <picojson.h>
 +
 +#include <algorithm>
++#include <cstring>
 +#include <fstream>
 +#include <iterator>
 +#include <set>
++#include <vector>
++
++#if defined(_WIN32)
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#include <windows.h>
++#include <winioctl.h>
++#endif
 +
 +namespace fs = std::filesystem;
 +
@@ -1498,6 +1600,112 @@ index 0000000..b89c5f2
 +// Mod folders are linked into the Load folders, so scans follow links.
 +constexpr auto kScanOptions = fs::directory_options::skip_permission_denied |
 +                              fs::directory_options::follow_directory_symlink;
++
++bool IsDirectoryLink(const fs::path &path) {
++  std::error_code ec;
++  if (fs::is_symlink(fs::symlink_status(path, ec)))
++    return true;
++#if defined(_WIN32)
++  const DWORD attrs = GetFileAttributesW(path.c_str());
++  if (attrs != INVALID_FILE_ATTRIBUTES &&
++      (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
++    return true;
++#endif
++  return false;
++}
++
++void RemoveDirectoryLink(const fs::path &path) {
++#if defined(_WIN32)
++  if (RemoveDirectoryW(path.c_str()))
++    return;
++#endif
++  std::error_code ec;
++  fs::remove(path, ec);
++}
++
++#if defined(_WIN32)
++// Standard Windows users lack SeCreateSymbolicLinkPrivilege unless Developer
++// Mode is enabled, so create_directory_symlink fails with ERROR_PRIVILEGE_NOT_HELD.
++// NTFS directory junctions (IO_REPARSE_TAG_MOUNT_POINT) need no admin rights.
++bool CreateDirectoryJunction(const fs::path &target, const fs::path &link,
++                             std::error_code &ec) {
++  ec.clear();
++  const fs::path abs_target = fs::weakly_canonical(target, ec);
++  if (ec)
++    return false;
++  std::wstring print_name = abs_target.wstring();
++  std::wstring sub_name = print_name.starts_with(L"\\\\?\\")
++                              ? (L"\\??\\" + print_name.substr(4))
++                              : (L"\\??\\" + print_name);
++
++  if (!CreateDirectoryW(link.c_str(), nullptr)) {
++    ec = std::error_code(static_cast<int>(GetLastError()), std::system_category());
++    return false;
++  }
++
++  const HANDLE handle = CreateFileW(
++      link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
++      FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
++  if (handle == INVALID_HANDLE_VALUE) {
++    ec = std::error_code(static_cast<int>(GetLastError()), std::system_category());
++    RemoveDirectoryW(link.c_str());
++    return false;
++  }
++
++  struct MountPointReparseHeader {
++    DWORD ReparseTag;
++    WORD ReparseDataLength;
++    WORD Reserved;
++    WORD SubstituteNameOffset;
++    WORD SubstituteNameLength;
++    WORD PrintNameOffset;
++    WORD PrintNameLength;
++  };
++
++  const WORD sub_bytes = static_cast<WORD>(sub_name.size() * sizeof(wchar_t));
++  const WORD print_bytes = static_cast<WORD>(print_name.size() * sizeof(wchar_t));
++  const WORD data_length =
++      static_cast<WORD>(sizeof(WORD) * 4 + sub_bytes + sizeof(wchar_t) +
++                        print_bytes + sizeof(wchar_t));
++  std::vector<std::uint8_t> buffer(sizeof(MountPointReparseHeader) + sub_bytes +
++                                       sizeof(wchar_t) + print_bytes + sizeof(wchar_t),
++                                   0);
++  auto *header = reinterpret_cast<MountPointReparseHeader *>(buffer.data());
++  header->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
++  header->ReparseDataLength = data_length;
++  header->Reserved = 0;
++  header->SubstituteNameOffset = 0;
++  header->SubstituteNameLength = sub_bytes;
++  header->PrintNameOffset = static_cast<WORD>(sub_bytes + sizeof(wchar_t));
++  header->PrintNameLength = print_bytes;
++
++  auto *path_buffer = buffer.data() + sizeof(MountPointReparseHeader);
++  std::memcpy(path_buffer, sub_name.data(), sub_bytes);
++  std::memcpy(path_buffer + header->PrintNameOffset, print_name.data(), print_bytes);
++
++  DWORD bytes_returned = 0;
++  const BOOL ok = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer.data(),
++                                  static_cast<DWORD>(buffer.size()), nullptr, 0,
++                                  &bytes_returned, nullptr);
++  const DWORD err = ok ? ERROR_SUCCESS : GetLastError();
++  CloseHandle(handle);
++  if (!ok) {
++    RemoveDirectoryW(link.c_str());
++    ec = std::error_code(static_cast<int>(err), std::system_category());
++    return false;
++  }
++  return true;
++}
++#endif
++
++void CreateDirectoryLink(const fs::path &target, const fs::path &link,
++                         std::error_code &ec) {
++  fs::create_directory_symlink(target, link, ec);
++#if defined(_WIN32)
++  if (ec)
++    CreateDirectoryJunction(target, link, ec);
++#endif
++}
 +
 +fs::path ModListPath(const fs::path &user_directory) {
 +  return user_directory / "Config" / "glinux-mods.txt";
@@ -1514,7 +1722,7 @@ index 0000000..b89c5f2
 +fs::path FreeName(const fs::path &folder, const fs::path &name) {
 +  std::error_code error;
 +  fs::path candidate = folder / name;
-+  for (int i = 2; fs::exists(fs::symlink_status(candidate, error)); ++i)
++  for (int i = 2; fs::exists(fs::symlink_status(candidate, error)) || IsDirectoryLink(candidate); ++i)
 +    candidate = folder / (name.string() + " (" + std::to_string(i) + ")");
 +  return candidate;
 +}
@@ -1720,7 +1928,7 @@ index 0000000..b89c5f2
 +    for (const auto &entry :
 +         fs::directory_iterator(LoadFolder(user_directory, game_id, kind), error)) {
 +      std::error_code type_error;
-+      if (entry.is_symlink(type_error) || !entry.is_directory(type_error))
++      if (IsDirectoryLink(entry.path()) || !entry.is_directory(type_error))
 +        continue;
 +      mods.push_back({.path = entry.path(), .kind = kind, .in_load_folder = true});
 +    }
@@ -1774,9 +1982,8 @@ index 0000000..b89c5f2
 +    fs::create_directories(folder, fs_error);
 +    // Links are only ever made by the launcher; real folders are left alone.
 +    for (const auto &entry : fs::directory_iterator(folder, fs_error)) {
-+      std::error_code link_error;
-+      if (entry.is_symlink(link_error))
-+        fs::remove(entry.path(), link_error);
++      if (IsDirectoryLink(entry.path()))
++        RemoveDirectoryLink(entry.path());
 +    }
 +  }
 +  for (const ModFolder &mod : mods) {
@@ -1785,7 +1992,7 @@ index 0000000..b89c5f2
 +      continue;
 +    const fs::path link =
 +        FreeName(LoadFolder(user_directory, game_id, mod.kind), mod.path.filename());
-+    fs::create_directory_symlink(mod.path, link, fs_error);
++    CreateDirectoryLink(mod.path, link, fs_error);
 +    if (fs_error) {
 +      if (error)
 +        *error = "can't link " + mod.path.string() + ": " + fs_error.message();
@@ -1947,7 +2154,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..f82c69b 100644
+index 7699c3d..abfe602 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -2093,7 +2300,125 @@ index 7699c3d..f82c69b 100644
  fs::path ExecutableDirectory(const char* argv0)
  {
    std::error_code ec;
-@@ -337,7 +431,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -204,6 +298,28 @@ bool ApplyBundledDolPatch(const fs::path& game_root, const fs::path& release_dir
+ #endif
+ }
+ 
++// Converts a path to UTF-8 without throwing std::system_error if a directory
++// on Windows contains an invalid UTF-16 surrogate or unmappable filename.
++std::string SafePathString(const fs::path& path)
++{
++  try
++  {
++    const std::u8string u8 = path.u8string();
++    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
++  }
++  catch (...)
++  {
++    try
++    {
++      return path.string();
++    }
++    catch (...)
++    {
++      return {};
++    }
++  }
++}
++
+ fs::path DefaultGameFile(const fs::path& user_directory, const fs::path& release_directory)
+ {
+ #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
+@@ -221,8 +337,21 @@ fs::path ReadDefaultGame(const fs::path& user_directory, const fs::path& release
+   if (!value.empty() && value.back() == '\r')
+     value.pop_back();
+   fs::path game(value);
+-  if (game.is_relative())
++  if (!game.empty() && game.is_relative())
+     game = release_directory / game;
++  std::error_code ec;
++  if (!game.empty() && fs::is_directory(game, ec))
++    return game;
++#ifdef MODERNGEKKO_REQUIRED_DISC_ID
++  if (const fs::path adjacent = release_directory / MODERNGEKKO_REQUIRED_DISC_ID;
++      fs::is_directory(adjacent, ec))
++    return adjacent;
++  if (const fs::path user_game = user_directory / "games" / MODERNGEKKO_REQUIRED_DISC_ID;
++      fs::is_directory(user_game, ec))
++    return user_game;
++#endif
++  if (const fs::path portable = release_directory / "Game"; fs::is_directory(portable, ec))
++    return portable;
+   return game;
+ }
+ 
+@@ -245,37 +374,43 @@ bool WriteDefaultGame(const fs::path& user_directory, const fs::path& release_di
+   if (!ec && !relative.empty())
+     stored = relative;
+ #endif
+-  file << stored.string() << '\n';
++  file << SafePathString(stored) << '\n';
+   return true;
+ }
+ 
+-std::vector<fs::path> FindDiscImages()
++std::vector<fs::path> FindDiscImages(const fs::path& release_directory)
+ {
+   std::vector<fs::path> images;
+-  std::error_code ec;
+-  const fs::path documents = DocumentsDirectory();
+-  if (!fs::is_directory(documents, ec))
+-    return images;
+-  fs::recursive_directory_iterator iterator(documents,
+-                                            fs::directory_options::skip_permission_denied, ec);
+-  const fs::recursive_directory_iterator end;
+-  while (iterator != end)
++  const auto scan_top_level = [&](const fs::path& folder)
+   {
+-    if (iterator.depth() > 4)
+-      iterator.disable_recursion_pending();
+-    if (iterator->is_regular_file(ec))
++    std::error_code ec;
++    if (folder.empty() || !fs::is_directory(folder, ec))
++      return;
++    for (fs::directory_iterator iterator(folder, fs::directory_options::skip_permission_denied, ec);
++         iterator != fs::directory_iterator{};)
+     {
+-      std::string extension = iterator->path().extension().string();
+-      std::ranges::transform(extension, extension.begin(),
+-                             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+-      if (extension == ".wbfs" || extension == ".iso" || extension == ".rvz")
+-        images.push_back(iterator->path());
++      std::error_code entry_ec;
++      const fs::directory_entry entry = *iterator;
++      if (entry.is_regular_file(entry_ec) && !entry_ec)
++      {
++        std::string extension = SafePathString(entry.path().extension());
++        std::ranges::transform(extension, extension.begin(),
++                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++        if (extension == ".wbfs" || extension == ".iso" || extension == ".rvz")
++          images.push_back(entry.path());
++      }
++      iterator.increment(ec);
++      if (ec)
++        ec.clear();
+     }
+-    iterator.increment(ec);
+-    if (ec)
+-      ec.clear();
+-  }
++  };
++  // Never recursively walk Documents on the main thread: OneDrive placeholders
++  // and large My Games trees freeze the window ("Not Responding") on Windows.
++  scan_top_level(release_directory);
++  scan_top_level(DownloadsDirectory());
++  scan_top_level(DocumentsDirectory());
+   std::ranges::sort(images);
++  images.erase(std::ranges::unique(images).begin(), images.end());
+   return images;
+ }
+ 
+@@ -337,7 +472,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    return output;
  #else
@@ -2106,7 +2431,76 @@ index 7699c3d..f82c69b 100644
    return std::nullopt;
  #endif
  }
-@@ -464,6 +562,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -380,11 +519,21 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+                 disc_id);
+ #endif
+ #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
+-  const fs::path games_directory = release_directory;
+-  const fs::path output = games_directory / "Game";
++  fs::path games_directory = release_directory;
++  fs::path output = games_directory / "Game";
++#elif defined(_WIN32)
++  // On Windows, extract directly next to the selected ISO/RVZ image so the
++  // game folder is visible right where the user keeps their ROMs rather than
++  // hidden in %LOCALAPPDATA%.
++  std::error_code abs_ec;
++  const fs::path abs_image = fs::absolute(image, abs_ec);
++  fs::path games_directory = (!abs_ec && abs_image.has_parent_path()) ?
++                                 abs_image.parent_path() :
++                                 (image.has_parent_path() ? image.parent_path() : (user_directory / "games"));
++  fs::path output = games_directory / disc_id;
+ #else
+-  const fs::path games_directory = user_directory / "games";
+-  const fs::path output = games_directory / disc_id;
++  fs::path games_directory = user_directory / "games";
++  fs::path output = games_directory / disc_id;
+ #endif
+   std::error_code ec;
+   if (fs::is_directory(output, ec))
+@@ -397,19 +546,40 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+   const auto existing = moderngekko::InspectGame(output);
+   if (existing && RequiredGameError(*existing.metadata).empty())
+   {
++    moderngekko::frontend::PatchRelGoldCheats(output, true, nullptr);
+     std::string error;
+     if (!WriteDefaultGame(user_directory, release_directory, output, &error))
+       return fail(error);
+     std::lock_guard lock(state->mutex);
+     state->finished_game = output;
+-    state->status = "Using existing extraction";
++    state->status = "Using existing extraction: " + SafePathString(output);
+     state->running = false;
+     return true;
+   }
+ 
+-  const fs::path staging = games_directory / (disc_id + ".extracting");
++  fs::path staging = games_directory / (disc_id + ".extracting");
+   fs::remove_all(staging, ec);
++  ec.clear();
+   fs::create_directories(staging / "files", ec);
++#if defined(_WIN32) && !defined(MODERNGEKKO_PORTABLE_DEFAULT_GAME)
++  if (ec)
++  {
++    // If the ISO lives on a read-only drive (e.g. a mounted virtual disc),
++    // fall back to the launcher folder and then %LOCALAPPDATA%.
++    for (const fs::path& fallback_dir : {release_directory, user_directory / "games"})
++    {
++      ec.clear();
++      games_directory = fallback_dir;
++      output = games_directory / disc_id;
++      staging = games_directory / (disc_id + ".extracting");
++      fs::remove_all(staging, ec);
++      ec.clear();
++      fs::create_directories(staging / "files", ec);
++      if (!ec)
++        break;
++    }
++  }
++#endif
+   if (ec)
+     return fail("can't create extraction directory: " + ec.message());
+ 
+@@ -464,6 +634,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    fs::rename(staging, output, ec);
    if (ec)
      return fail("can't publish extracted game: " + ec.message());
@@ -2114,7 +2508,7 @@ index 7699c3d..f82c69b 100644
    std::string error;
    if (!WriteDefaultGame(user_directory, release_directory, output, &error))
      return fail(error);
-@@ -498,12 +597,134 @@ fs::path SiblingRunner(const char* argv0)
+@@ -498,12 +669,134 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -2239,7 +2633,8 @@ index 7699c3d..f82c69b 100644
 +}
  } // namespace
  
- int main(int argc, char** argv)
+-int main(int argc, char** argv)
++int LauncherMain(int argc, char** argv)
  {
 +  if (argc > 1 && std::string_view(argv[1]) == "--confirm-exit")
 +    return ConfirmExitDialog(argc > 2 && std::string_view(argv[2]) == "--online");
@@ -2249,7 +2644,7 @@ index 7699c3d..f82c69b 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +733,23 @@ int main(int argc, char** argv)
+@@ -512,9 +805,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -2274,7 +2669,7 @@ index 7699c3d..f82c69b 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +765,12 @@ int main(int argc, char** argv)
+@@ -530,6 +837,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -2287,7 +2682,7 @@ index 7699c3d..f82c69b 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -547,7 +788,7 @@ int main(int argc, char** argv)
+@@ -547,7 +860,7 @@ int main(int argc, char** argv)
      return 1;
  
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -2296,7 +2691,7 @@ index 7699c3d..f82c69b 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,6 +797,11 @@ int main(int argc, char** argv)
+@@ -556,9 +869,20 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -2305,10 +2700,19 @@ index 7699c3d..f82c69b 100644
 +  if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable))
 +    SDL_SetWindowSize(window, std::min(static_cast<int>(1100*scale), usable.w),
 +                      std::min(static_cast<int>(700*scale), usable.h));
++#if defined(_WIN32)
++  // Prefer SDL's default Direct3D 11 2D renderer on Windows to avoid hangs or
++  // crashes from broken third-party Vulkan overlay layers.
++  SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
++#else
    SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
    if (!renderer)
      renderer = SDL_CreateRenderer(window, nullptr);
-@@ -571,17 +817,27 @@ int main(int argc, char** argv)
++#endif
+   if (!renderer)
+   {
+     SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
+@@ -571,17 +895,27 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
@@ -2327,17 +2731,18 @@ index 7699c3d..f82c69b 100644
    ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
    ImGui_ImplSDLRenderer3_Init(renderer);
  
+-  std::vector<fs::path> images = FindDiscImages();
 +  const Artwork background = LoadArtwork(renderer, release_directory / "Assets" / "flash1.png");
 +  const Artwork logo = LoadArtwork(renderer, release_directory / "Assets" / "FZ_TRANSPARENTLOGO.png", true);
 +  int preview_frames = 0;
-   std::vector<fs::path> images = FindDiscImages();
++  std::vector<fs::path> images = FindDiscImages(release_directory);
    std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
    fs::path current_game = ReadDefaultGame(user_directory, release_directory);
 +  moderngekko::frontend::PatchRelGoldCheats(current_game, true, nullptr);
    bool current_dol_changed = false;
    std::string current_dol_error;
    auto current_metadata =
-@@ -600,8 +856,18 @@ int main(int argc, char** argv)
+@@ -600,8 +934,18 @@ int main(int argc, char** argv)
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
                  config.netplay_nickname.c_str());
@@ -2358,40 +2763,91 @@ index 7699c3d..f82c69b 100644
    int netplay_port = config.netplay_port;
    bool automatic_buffer = config.netplay_buffer == "auto";
    int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
-@@ -631,6 +897,10 @@ int main(int argc, char** argv)
+@@ -631,6 +975,13 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
-+  fs::path browser_directory = ExistingDirectory(DocumentsDirectory());
++  fs::path browser_directory =
++      selected_image && selected_image->has_parent_path() ?
++          ExistingDirectory(selected_image->parent_path()) :
++          ExistingDirectory(DownloadsDirectory());
 +  std::vector<std::pair<fs::path, bool>> browser_entries;
 +  std::string browser_error;
 +  bool browser_refresh = true;
    DialogState dialog;
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -683,15 +953,16 @@ int main(int argc, char** argv)
+@@ -639,6 +990,7 @@ int main(int argc, char** argv)
+   std::string selected_controller =
+       configured_controllers.empty() ? config.controller : configured_controllers.front();
+   int controller_index = FindController(controllers, selected_controller);
++  bool user_chose_controller = false;
+   std::string controller_status;
+   const auto select_controller = [&](int index)
+   {
+@@ -681,23 +1033,43 @@ int main(int argc, char** argv)
+                        " has no configured controller device";
+         return false;
        }
++      if (controller_index >= 0 &&
++          controllers[controller_index].device != configured_controllers.front())
++      {
++        return select_controller(controller_index);
++      }
        selected_controller = configured_controllers.front();
        controller_index = FindController(controllers, selected_controller);
-+      // The saved gamepad is gone and none other is connected; without this
-+      // the game would start with no input at all.
-+      if (controller_index < 0 && controllers.size() == 1)
++      // The saved gamepad is gone: switch to the first connected gamepad, or
++      // keyboard if none are connected.
++      if (controller_index < 0 && !controllers.empty())
++      {
++        controller_index = 0;
 +        return select_controller(0);
++      }
++      moderngekko::frontend::SetBoostLayout(user_directory, config.boost_on_x, nullptr);
        controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
        return true;
      }
-+    // No saved choice is connected: use the keyboard, the last entry.
-     if (controller_index < 0)
+-    if (controller_index < 0)
 -    {
 -      std::lock_guard lock(dialog.mutex);
 -      dialog.error = "Connect an SDL-compatible controller before playing";
 -      return false;
 -    }
-+      controller_index = static_cast<int>(controllers.size()) - 1;
++    // No saved choice is connected: use the first connected gamepad, or keyboard.
++    if (controller_index < 0 && !controllers.empty())
++      controller_index = 0;
      return select_controller(controller_index);
    };
    const auto refresh_controllers = [&]
-@@ -774,14 +1045,18 @@ int main(int argc, char** argv)
+   {
+     controllers = EnumerateControllers();
+     controller_index = FindController(controllers, selected_controller);
++    // If startup initially fell back to Keyboard before SDL finished enumerating
++    // a USB/Bluetooth/GameCube gamepad, switch to the newly detected gamepad.
++    if (!user_chose_controller &&
++        selected_controller == moderngekko::frontend::KEYBOARD_DEVICE &&
++        controllers.size() > 1)
++    {
++      controller_index = 0;
++      select_controller(0);
++      return;
++    }
+     if (!controller_profile_exists)
+     {
+       if (controller_index < 0 && !controllers.empty())
+@@ -710,6 +1082,11 @@ int main(int argc, char** argv)
+       else
+         controller_status = "No SDL gamepad detected";
+     }
++    else if (controller_index < 0 && !controllers.empty())
++    {
++      controller_index = 0;
++      select_controller(0);
++    }
+     else
+     {
+       controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
+@@ -774,14 +1151,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -2413,7 +2869,7 @@ index 7699c3d..f82c69b 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1095,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1201,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -2423,7 +2879,7 @@ index 7699c3d..f82c69b 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1104,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1210,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -2486,7 +2942,7 @@ index 7699c3d..f82c69b 100644
      }
      else
      {
-@@ -891,6 +1111,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1217,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -2494,7 +2950,7 @@ index 7699c3d..f82c69b 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1161,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1267,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2529,7 +2985,7 @@ index 7699c3d..f82c69b 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1220,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1326,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2565,7 +3021,21 @@ index 7699c3d..f82c69b 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -1005,6 +1273,8 @@ int main(int argc, char** argv)
+@@ -993,18 +1367,17 @@ int main(int argc, char** argv)
+         const bool selected = controller_index == static_cast<int>(i);
+         if (ImGui::Selectable(controllers[i].label.c_str(), selected))
+         {
++          user_chose_controller = true;
+           controller_index = static_cast<int>(i);
+-          selected_controller = controllers[i].device;
+-          controller_status =
+-              controller_profile_exists
+-                  ? "Existing " + std::string(CONTROLLER_PROFILE_NAME) + " unchanged"
+-                  : "Ready to generate controller profile";
++          select_controller(controller_index);
+         }
+         if (selected)
+           ImGui::SetItemDefaultFocus();
        }
        ImGui::EndCombo();
      }
@@ -2574,7 +3044,7 @@ index 7699c3d..f82c69b 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,39 +1282,362 @@ int main(int argc, char** argv)
+@@ -1012,67 +1385,443 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -2608,9 +3078,14 @@ index 7699c3d..f82c69b 100644
 +        std::lock_guard lock(dialog.mutex);
 +        dialog.error = std::move(error);
 +      }
-+    }
+     }
 +    ImGui::TextWrapped("Xbox-style layout: A accelerates, X boosts, Y takes the original X action. Sticks and triggers are preserved.");
-+    ImGui::Spacing();
+     ImGui::Spacing();
+-    ImGui::TextUnformatted("Game disc image");
+-    if (selected_image)
+-      ImGui::TextWrapped("%s", selected_image->string().c_str());
+-    else
+-      ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
 +    }
 +    const std::string game_id =
 +        current_metadata ? current_metadata.metadata->disc_id : std::string();
@@ -2699,29 +3174,34 @@ index 7699c3d..f82c69b 100644
 +          std::error_code ec;
 +          for (fs::directory_iterator entries(mod_browser_directory,
 +                                              fs::directory_options::skip_permission_denied, ec);
-+               !ec && entries != fs::directory_iterator{}; entries.increment(ec)) {
++               entries != fs::directory_iterator{};) {
 +            std::error_code type_error;
-+            if (entries->is_directory(type_error) &&
-+                !entries->path().filename().string().starts_with("."))
-+              mod_browser_entries.push_back(entries->path());
++            const fs::directory_entry entry = *entries;
++            const std::string filename = SafePathString(entry.path().filename());
++            if (entry.is_directory(type_error) && !type_error && !filename.empty() &&
++                !filename.starts_with("."))
++              mod_browser_entries.push_back(entry.path());
++            entries.increment(ec);
++            if (ec)
++              ec.clear();
 +          }
 +          std::ranges::sort(mod_browser_entries);
 +          mod_browser_refresh = false;
 +        }
-+        ImGui::TextWrapped("%s", mod_browser_directory.string().c_str());
++        ImGui::TextWrapped("%s", SafePathString(mod_browser_directory).c_str());
 +        if (ImGui::Button("Use this folder")) {
 +          std::error_code ec;
 +          const fs::path folder = fs::canonical(mod_browser_directory, ec);
 +          const auto kind = moderngekko::frontend::DetectModKind(folder);
 +          const fs::path load = fs::weakly_canonical(user_directory / "Load", ec);
 +          if (!kind) {
-+            mod_message = "No mod found in " + folder.filename().string() +
++            mod_message = "No mod found in " + SafePathString(folder.filename()) +
 +                          ": expected tex1_*.dds/.png files or a metadata.json.";
-+          } else if (folder.string().starts_with((load / "").string())) {
++          } else if (SafePathString(folder).starts_with(SafePathString(load / ""))) {
 +            mod_message = "That folder is already installed in Dolphin's Load folder.";
 +          } else if (std::ranges::any_of(mod_folders, [&](const auto &mod) {
 +                       return mod.path == folder; })) {
-+            mod_message = folder.filename().string() + " is already in the list.";
++            mod_message = SafePathString(folder.filename()) + " is already in the list.";
 +          } else {
 +            mod_folders.push_back({.path = folder, .kind = *kind});
 +            mod_message.clear();
@@ -2735,13 +3215,18 @@ index 7699c3d..f82c69b 100644
 +          mod_browser_refresh = true;
 +        }
 +        ImGui::SameLine();
++        if (ImGui::Button("Downloads")) {
++          mod_browser_directory = ExistingDirectory(DownloadsDirectory());
++          mod_browser_refresh = true;
++        }
++        ImGui::SameLine();
 +        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
 +            ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
 +        if (DriveButtons(&mod_browser_directory)) mod_browser_refresh = true;
 +        HintText("Open the mod's folder, then press Use this folder.");
 +        if (ImGui::BeginChild("Mod folders", ImVec2(0, 0))) {
 +          for (const fs::path &path : mod_browser_entries) {
-+            if (ImGui::Selectable(("[Folder] " + path.filename().string()).c_str(), false,
++            if (ImGui::Selectable(("[Folder] " + SafePathString(path.filename())).c_str(), false,
 +                                  ImGuiSelectableFlags_NoAutoClosePopups)) {
 +              mod_browser_directory = path;
 +              mod_browser_refresh = true;
@@ -2859,10 +3344,11 @@ index 7699c3d..f82c69b 100644
 +        }
 +        launch_online(LaunchMode::Join);
 +      }
-     }
++    }
 +    if (!online_message.empty())
 +      ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%s", online_message.c_str());
-+
+ 
+-    if (!extraction.running)
 +    ImGui::Spacing();
 +    if (ImGui::TreeNode("Advanced: LAN / direct IP")) {
 +      HintText("Instead of a room code you can type the host's IP address in the "
@@ -2879,19 +3365,16 @@ index 7699c3d..f82c69b 100644
 +      ImGui::TreePop();
 +    }
 +    ImGui::EndDisabled();
-     ImGui::Spacing();
++    ImGui::Spacing();
 +    }
-     ImGui::TextUnformatted("Game disc image");
-     if (selected_image)
-       ImGui::TextWrapped("%s", selected_image->string().c_str());
-     else
--      ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
-+      ImGui::TextDisabled("No ISO or RVZ selected");
- 
-     if (!extraction.running)
++    const bool show_disc_section =
++        !current_metadata || extraction.running ||
++        ImGui::CollapsingHeader("GAME FILES & DISC IMAGE");
++    if (show_disc_section)
      {
 -      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
--      {
++      if (current_metadata)
+       {
 -        static constexpr SDL_DialogFileFilter filters[] = {
 -            {"Disc images", "iso;wbfs;rvz"},
 -            {"ISO", "iso"},
@@ -2900,68 +3383,160 @@ index 7699c3d..f82c69b 100644
 -        const std::string documents = DocumentsDirectory().string();
 -        SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
 -                               static_cast<int>(std::size(filters)), documents.c_str(), false);
-+      if (ImGui::Button("Browse for ISO / RVZ")) {
-+        browser_refresh = true;
-+        ImGui::OpenPopup("Choose game image");
-+      }
-+      ImGui::SetNextWindowSize(ImVec2(680 * scale, 520 * scale), ImGuiCond_Appearing);
-+      if (ImGui::BeginPopupModal("Choose game image", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
-+        if (browser_refresh) {
-+          browser_entries.clear();
-+          browser_error.clear();
-+          std::error_code ec;
-+          fs::directory_iterator entries(browser_directory, fs::directory_options::skip_permission_denied, ec);
-+          while (!ec && entries != fs::directory_iterator{}) {
-+            const auto entry = *entries;
-+            std::error_code type_error;
-+            const bool directory = entry.is_directory(type_error);
-+            std::string extension = entry.path().extension().string();
-+            std::transform(extension.begin(), extension.end(), extension.begin(),
-+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-+            if (!type_error && (directory || extension == ".iso" || extension == ".rvz"))
-+              browser_entries.emplace_back(entry.path(), directory);
-+            entries.increment(ec);
-+          }
-+          if (ec) browser_error = ec.message();
-+          std::sort(browser_entries.begin(), browser_entries.end(), [](const auto &a, const auto &b) {
-+            if (a.second != b.second) return a.second > b.second;
-+            return a.first.filename() < b.first.filename();
-+          });
-+          browser_refresh = false;
-+        }
-+        ImGui::TextWrapped("%s", browser_directory.string().c_str());
-+        if (ImGui::Button("Parent folder")) {
-+          browser_directory = browser_directory.parent_path();
-+          browser_refresh = true;
-+        }
-+        ImGui::SameLine();
-+        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
-+            ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
-+        if (DriveButtons(&browser_directory)) browser_refresh = true;
-+        if (!browser_error.empty()) ImGui::TextWrapped("%s", browser_error.c_str());
-+        if (ImGui::BeginChild("Image files", ImVec2(0, 0))) {
-+          for (std::size_t i = 0; i < browser_entries.size(); ++i) {
-+            const auto &[path, directory] = browser_entries[i];
-+            const std::string label = (directory ? "[Folder] " : "") + path.filename().string();
-+            ImGui::PushID(static_cast<int>(i));
-+            if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups)) {
-+              if (directory) {
-+                browser_directory = path;
-+                browser_refresh = true;
-+              } else {
-+                selected_image = path;
-+                ImGui::CloseCurrentPopup();
-+              }
-+            }
-+            ImGui::PopID();
-+          }
-+        }
-+        ImGui::EndChild();
-+        ImGui::EndPopup();
++        ImGui::TextUnformatted("Extracted game folder");
++        ImGui::TextWrapped("%s", SafePathString(current_game).c_str());
++        HintText("The game is already extracted and ready to play. Only select an ISO or RVZ "
++                 "below if you want to re-extract.");
++        ImGui::Spacing();
        }
++      ImGui::TextUnformatted("Game disc image");
        if (selected_image)
++        ImGui::TextWrapped("%s", SafePathString(*selected_image).c_str());
++      else
++        ImGui::TextDisabled("No ISO or RVZ selected");
++
++      if (!extraction.running)
        {
-@@ -1090,16 +1683,71 @@ int main(int argc, char** argv)
+-        ImGui::SameLine();
+-        if (ImGui::Button("Extract and Play"))
++        if (ImGui::Button("Browse for ISO / RVZ")) {
++          browser_refresh = true;
++          ImGui::OpenPopup("Choose game image");
++        }
++        ImGui::SetNextWindowSize(ImVec2(680 * scale, 520 * scale), ImGuiCond_Appearing);
++        if (ImGui::BeginPopupModal("Choose game image", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
++          if (browser_refresh) {
++            browser_entries.clear();
++            browser_error.clear();
++            std::error_code ec;
++            fs::directory_iterator entries(browser_directory, fs::directory_options::skip_permission_denied, ec);
++            if (ec)
++              browser_error = ec.message();
++            while (entries != fs::directory_iterator{}) {
++              std::error_code type_error;
++              const auto entry = *entries;
++              const bool directory = entry.is_directory(type_error);
++              std::string extension = SafePathString(entry.path().extension());
++              std::transform(extension.begin(), extension.end(), extension.begin(),
++                             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++              if (!type_error && !SafePathString(entry.path().filename()).empty() &&
++                  (directory || extension == ".iso" || extension == ".rvz"))
++                browser_entries.emplace_back(entry.path(), directory);
++              entries.increment(ec);
++              if (ec)
++                ec.clear();
++            }
++            std::sort(browser_entries.begin(), browser_entries.end(), [](const auto &a, const auto &b) {
++              if (a.second != b.second) return a.second > b.second;
++              return a.first.filename() < b.first.filename();
++            });
++            browser_refresh = false;
++          }
++          ImGui::TextWrapped("%s", SafePathString(browser_directory).c_str());
++          if (ImGui::Button("Parent folder")) {
++            browser_directory = browser_directory.parent_path();
++            browser_refresh = true;
++          }
++          ImGui::SameLine();
++          if (ImGui::Button("Downloads")) {
++            browser_directory = ExistingDirectory(DownloadsDirectory());
++            browser_refresh = true;
++          }
++          ImGui::SameLine();
++          if (ImGui::Button("Documents")) {
++            browser_directory = ExistingDirectory(DocumentsDirectory());
++            browser_refresh = true;
++          }
++          ImGui::SameLine();
++          if (ImGui::Button("Launcher folder")) {
++            browser_directory = ExistingDirectory(release_directory);
++            browser_refresh = true;
++          }
++          ImGui::SameLine();
++          if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
++              ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
++          if (DriveButtons(&browser_directory)) browser_refresh = true;
++          if (!browser_error.empty()) ImGui::TextWrapped("%s", browser_error.c_str());
++          if (ImGui::BeginChild("Image files", ImVec2(0, 0))) {
++            for (std::size_t i = 0; i < browser_entries.size(); ++i) {
++              const auto &[path, directory] = browser_entries[i];
++              const std::string label =
++                  (directory ? "[Folder] " : "") + SafePathString(path.filename());
++              ImGui::PushID(static_cast<int>(i));
++              if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups)) {
++                if (directory) {
++                  browser_directory = path;
++                  browser_refresh = true;
++                } else {
++                  selected_image = path;
++                  ImGui::CloseCurrentPopup();
++                }
++              }
++              ImGui::PopID();
++            }
++          }
++          ImGui::EndChild();
++          ImGui::EndPopup();
++        }
++        if (selected_image)
+         {
+-          extraction.completed = 0;
+-          extraction.total = 1;
+-          extraction.running = true;
++          ImGui::SameLine();
++          if (ImGui::Button("Extract and Play"))
+           {
+-            std::lock_guard lock(extraction.mutex);
+-            extraction.error.clear();
+-            extraction.finished_game.reset();
++            extraction.completed = 0;
++            extraction.total = 1;
++            extraction.running = true;
++            {
++              std::lock_guard lock(extraction.mutex);
++              extraction.error.clear();
++              extraction.finished_game.reset();
++            }
++            const fs::path image = *selected_image;
++            extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
++                                             {
++                                               try
++                                               {
++                                                 ExtractDisc(image, user_directory,
++                                                             release_directory, &extraction);
++                                               }
++                                               catch (const std::exception& e)
++                                               {
++                                                 std::lock_guard lock(extraction.mutex);
++                                                 extraction.error = e.what();
++                                                 extraction.running = false;
++                                               }
++                                             });
+           }
+-          const fs::path image = *selected_image;
+-          extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
+-                                           {
+-                                             ExtractDisc(image, user_directory,
+-                                                         release_directory, &extraction);
+-                                           });
+         }
+       }
+-    }
+-    else
+-    {
+-      const float progress =
+-          std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
+-      ImGui::ProgressBar(progress, ImVec2(-1, 0));
++      else
++      {
++        const float progress =
++            std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
++        ImGui::ProgressBar(progress, ImVec2(-1, 0));
++      }
+     }
+ 
+     {
+@@ -1090,16 +1839,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -3033,7 +3608,7 @@ index 7699c3d..f82c69b 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1766,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1922,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -3044,7 +3619,21 @@ index 7699c3d..f82c69b 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1201,9 +1853,29 @@ int main(int argc, char** argv)
+@@ -1165,6 +1973,13 @@ int main(int argc, char** argv)
+       std::filesystem::create_directories(log_path.parent_path(), log_error);
+       SDL_IOStream* log_stream =
+           log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
++      // Release gamepad/joystick handles before spawning the runner so USB
++      // GameCube adapters (claimed exclusively via libusb/WinUSB) and other
++      // controllers are not locked by the launcher while the game runs.
++      SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK);
++#if defined(_WIN32)
++      AllowSetForegroundWindow(ASFW_ANY);
++#endif
+       SDL_Process* process = nullptr;
+       std::string process_error;
+       if (log_stream)
+@@ -1201,9 +2016,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -3069,14 +3658,20 @@ index 7699c3d..f82c69b 100644
 +          if (loading_visible) draw_loading();
 +          SDL_Delay(16);
 +        }
-+        SDL_HideWindow(window);
++        if (loading_visible)
++        {
++#if defined(_WIN32)
++          AllowSetForegroundWindow(ASFW_ANY);
++#endif
++          SDL_HideWindow(window);
++        }
 +        const bool waited = exited || SDL_WaitProcess(process, true, &exit_code);
 +        std::error_code ready_cleanup_error;
 +        fs::remove(ready_file, ready_cleanup_error);
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +1911,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2080,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -3099,7 +3694,7 @@ index 7699c3d..f82c69b 100644
            }
            else
            {
-@@ -1266,6 +1941,8 @@ int main(int argc, char** argv)
+@@ -1266,8 +2110,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
@@ -3108,8 +3703,24 @@ index 7699c3d..f82c69b 100644
    SDL_DestroyRenderer(renderer);
    SDL_DestroyWindow(window);
    SDL_Quit();
+   return result;
+ }
++
++int main(int argc, char** argv)
++{
++  try
++  {
++    return LauncherMain(argc, argv);
++  }
++  catch (const std::exception& e)
++  {
++    std::cerr << "fatal launcher error: " << e.what() << '\n';
++    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, MODERNGEKKO_FRONTEND_NAME, e.what(), nullptr);
++    return 1;
++  }
++}
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..8eb6bec 100644
+index d6b3569..884b8cc 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -6,6 +6,7 @@
@@ -3120,7 +3731,28 @@ index d6b3569..8eb6bec 100644
  
  #include <charconv>
  #include <chrono>
-@@ -148,6 +149,7 @@ int RunMain(int argc, char **argv) {
+@@ -72,8 +73,19 @@ ReadDefaultGame(const std::filesystem::path &user_directory,
+   if (!path.empty() && path.back() == '\r')
+     path.pop_back();
+   std::filesystem::path result(path);
+-  if (result.is_relative())
++  if (!result.empty() && result.is_relative())
+     result = executable_directory / result;
++  std::error_code ec;
++  if (!result.empty() && std::filesystem::is_directory(result, ec))
++    return result;
++#ifdef MODERNGEKKO_REQUIRED_DISC_ID
++  if (const auto adjacent = executable_directory / MODERNGEKKO_REQUIRED_DISC_ID;
++      std::filesystem::is_directory(adjacent, ec))
++    return adjacent;
++#endif
++  if (const auto portable = executable_directory / "Game";
++      std::filesystem::is_directory(portable, ec))
++    return portable;
+   return result;
+ }
+ 
+@@ -148,6 +160,7 @@ int RunMain(int argc, char **argv) {
    std::string netplay_nickname;
    std::string netplay_buffer;
    std::vector<std::string> netplay_controllers;
@@ -3128,7 +3760,7 @@ index d6b3569..8eb6bec 100644
    for (int i = 1; i < argc; ++i) {
      const std::string arg = argv[i];
      const auto value = [&](const char *option) -> const char * {
-@@ -191,6 +193,8 @@ int RunMain(int argc, char **argv) {
+@@ -191,6 +204,8 @@ int RunMain(int argc, char **argv) {
        config.window_system = moderngekko::WindowSystem::Wayland;
      else if (arg == "--mute")
        config.audio.mute = true;
@@ -3137,7 +3769,7 @@ index d6b3569..8eb6bec 100644
      else if (arg == "--automation-dir")
        config.automation.directory = value("--automation-dir");
      else if (arg == "--headless")
-@@ -220,6 +224,10 @@ int RunMain(int argc, char **argv) {
+@@ -220,6 +235,10 @@ int RunMain(int argc, char **argv) {
        netplay_buffer = value("--buffer");
      else if (arg == "--controller")
        netplay_controllers.emplace_back(value("--controller"));
@@ -3148,7 +3780,7 @@ index d6b3569..8eb6bec 100644
      else if (arg == "--help" || arg == "-h") {
        Usage();
        return 0;
-@@ -246,6 +254,14 @@ int RunMain(int argc, char **argv) {
+@@ -246,6 +265,14 @@ int RunMain(int argc, char **argv) {
      return 2;
    }
    config.graphics.internal_resolution_scale = frontend_config.dolphin_scale;
@@ -3163,7 +3795,7 @@ index d6b3569..8eb6bec 100644
    if (config.graphics.backend.empty())
      config.graphics.backend = frontend_config.graphics_backend;
    config.fullscreen = frontend_config.fullscreen;
-@@ -335,9 +351,30 @@ int RunMain(int argc, char **argv) {
+@@ -335,9 +362,35 @@ int RunMain(int argc, char **argv) {
  
  #if defined(__linux__) || defined(_WIN32)
    if (!config.headless && config.graphics.backend.empty())
@@ -3182,7 +3814,12 @@ index d6b3569..8eb6bec 100644
 +    config.confirm_exit = [executable_directory](bool online) {
 +      // A separate process keeps Dolphin's SDL input event thread from consuming
 +      // the dialog's events, and leaves the game's renderer untouched.
-+      const std::string launcher = (executable_directory / "ModernGekko").string();
++      std::filesystem::path launcher_name = "ModernGekko";
++#if defined(_WIN32)
++      launcher_name += ".exe";
++      AllowSetForegroundWindow(ASFW_ANY);
++#endif
++      const std::string launcher = (executable_directory / launcher_name).string();
 +      const char* args[] = {launcher.c_str(), "--confirm-exit", online ? "--online" : "--offline", nullptr};
 +      SDL_Process* process = SDL_CreateProcess(args, false);
 +      if (!process) return false;

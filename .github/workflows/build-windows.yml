@@ -1,0 +1,121 @@
+name: Build Portable Windows Package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version suffix (e.g. 0.9-beta1)'
+        required: false
+        default: '0.9-beta1'
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Portable Zip
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Enable Git long paths on Windows
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build F-ZERO GLINUX and run Windows unit tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:GLINUX_CMAKE_ARGS = "-DBUILD_TESTING=ON"
+          powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+          if ($LASTEXITCODE -ne 0) { throw "scripts\build-windows.ps1 failed." }
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          cmd /c "`"$vcvars`" >nul && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') { Set-Item "env:$($Matches[1])" $Matches[2] }
+          }
+
+          cmake --build lib\ModernGekko\build --target `
+            moderngekko_frontend_config_test `
+            moderngekko_frontend_config_gamecube_test `
+            moderngekko_netplay_room_code_test `
+            moderngekko_dol_patch_test `
+            moderngekko_launcher_savestates_test
+          if ($LASTEXITCODE -ne 0) { throw "Building Windows unit tests failed." }
+
+          ctest --test-dir lib\ModernGekko\build `
+            -R "moderngekko\.(frontend_config|frontend_config_gamecube|netplay_room_code|dol_patch|launcher_savestates)" `
+            --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Windows unit tests failed." }
+
+      - name: Package Windows Portable Zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = "${{ inputs.version }}"
+          if (-not $version) {
+            if ("$env:GITHUB_REF" -like "refs/tags/v*") {
+              $version = $env:GITHUB_REF_NAME.TrimStart('v')
+            } else {
+              $version = "0.9-beta1"
+            }
+          }
+          powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Version $version
+          if ($LASTEXITCODE -ne 0) { throw "scripts\package-windows.ps1 failed." }
+
+      - name: Smoke test packaged Windows build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Get-ChildItem build\windows-package -Directory | Select-Object -First 1
+          if (-not $stage) { throw "Packaged Windows directory not found." }
+          $exe = Join-Path $stage.FullName "F-ZERO GLINUX.exe"
+          if (-not (Test-Path $exe)) { throw "F-ZERO GLINUX.exe missing from package." }
+
+          Write-Host "=== Launcher CLI --help test ==="
+          $helpOut = & $exe --help
+          if ($LASTEXITCODE -ne 0) { throw "F-ZERO GLINUX.exe --help exited with $LASTEXITCODE" }
+          Write-Host $helpOut
+
+          Write-Host "=== Launcher startup & 3-frame render smoke test ==="
+          $testUserDir = Join-Path $env:RUNNER_TEMP "fzero-glinux-smoke-user"
+          $previewPng = Join-Path $env:RUNNER_TEMP "launcher-preview.png"
+          $env:GLINUX_PREVIEW_OUTPUT = $previewPng
+          & $exe --user-dir $testUserDir
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Retrying with dummy video driver..."
+            $env:SDL_VIDEO_DRIVER = "dummy"
+            $env:SDL_RENDER_DRIVER = "software"
+            & $exe --user-dir $testUserDir
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Launcher 3-frame startup smoke test failed with code $LASTEXITCODE" }
+          if (-not (Test-Path $previewPng)) { throw "Launcher preview PNG was not rendered." }
+          if (-not (Test-Path (Join-Path $testUserDir "Config\GCPadNew.ini"))) {
+            throw "Launcher did not initialize Config\GCPadNew.ini."
+          }
+          Write-Host "Launcher rendered preview ($((Get-Item $previewPng).Length) bytes) and initialized user config cleanly."
+
+      - name: Upload Windows Zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: F-ZERO-GLINUX-Windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          retention-days: 14
