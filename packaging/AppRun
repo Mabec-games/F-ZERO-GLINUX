@@ -20,6 +20,12 @@ mkdir -p "$user_dir"
 export MODERNGEKKO_STATICRECOMP=0
 unset STATICRECOMP_MODULE
 export LD_LIBRARY_PATH="$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1
+export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
+if [[ -n "${SteamEnv:-}${SteamDeck:-}${GAMESCOPE_WAYLAND_DISPLAY:-}${SteamVirtualGamepadInfo:-}${SteamAppId:-}${SteamGameId:-}" ]]; then
+    export SDL_JOYSTICK_HIDAPI_STEAM=0
+    export SDL_JOYSTICK_HIDAPI_STEAMDECK=0
+fi
 # Honour explicit --wayland/--x11; select Wayland only without X/XWayland.
 backend=()
 if [[ -z "${DISPLAY:-}" && -n "${WAYLAND_DISPLAY:-}" ]]; then backend=(--wayland); fi

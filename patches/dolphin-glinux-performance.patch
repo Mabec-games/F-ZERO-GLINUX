@@ -660,10 +660,10 @@ index 3402fda..b2689bc 100644
  
    case WM_SYSKEYDOWN:
 diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
-index 8d0ae0c..c9f7b88 100644
+index 8d0ae0c..3a93199 100644
 --- a/Source/Core/DolphinNoGUI/PlatformX11.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformX11.cpp
-@@ -96,14 +96,21 @@ bool PlatformX11::Init()
+@@ -96,13 +96,19 @@ bool PlatformX11::Init()
    pid_t pid = getpid();
    XChangeProperty(m_display, m_window, XInternAtom(m_display, "_NET_WM_PID", False), XA_CARDINAL,
                    32, PropModeReplace, reinterpret_cast<unsigned char*>(&pid), 1);
@@ -683,11 +683,9 @@ index 8d0ae0c..c9f7b88 100644
 +  wmHints.initial_state = NormalState;
 +  XSetWMHints(m_display, m_window, &wmHints);
    XMapRaised(m_display, m_window);
-+  XSetInputFocus(m_display, m_window, RevertToParent, CurrentTime);
    XFlush(m_display);
    XSync(m_display, True);
-   ProcessEvents();
-@@ -192,9 +199,9 @@ void PlatformX11::ProcessEvents()
+@@ -192,9 +198,9 @@ void PlatformX11::ProcessEvents()
      {
      case KeyPress:
        key = XLookupKeysym((XKeyEvent*)&event, 0);
@@ -700,7 +698,7 @@ index 8d0ae0c..c9f7b88 100644
        else if (key == XK_F10)
        {
 diff --git a/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp b/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp
-index 5aeb9e0..5b5ade9 100644
+index 5aeb9e0..7f87cff 100644
 --- a/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp
 +++ b/Source/Core/InputCommon/ControllerInterface/SDL/SDL.cpp
 @@ -19,6 +19,7 @@
@@ -711,7 +709,24 @@ index 5aeb9e0..5b5ade9 100644
  #include "Core/HW/SI/SI.h"
  #include "Core/HW/SI/SI_Device.h"
  
-@@ -296,6 +297,22 @@ bool InputBackend::HandleEventAndContinue(const SDL_Event& e)
+@@ -135,6 +136,16 @@ InputBackend::InputBackend(ControllerInterface* controller_interface)
+ {
+   EnableSDLLogging();
+ 
++  SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
++  SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
++  if (std::getenv("SteamEnv") || std::getenv("SteamDeck") ||
++      std::getenv("GAMESCOPE_WAYLAND_DISPLAY") || std::getenv("SteamVirtualGamepadInfo") ||
++      std::getenv("SteamAppId") || std::getenv("SteamGameId"))
++  {
++    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "0");
++    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "0");
++  }
++
+   if (Config::Get(Config::MAIN_SDL_HINT_JOYSTICK_ENHANCED_REPORTS) == "")
+     Config::SetBase(Config::MAIN_SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "1");
+ 
+@@ -296,6 +307,22 @@ bool InputBackend::HandleEventAndContinue(const SDL_Event& e)
               static_cast<const Gamepad*>(device)->GetSDLInstanceID() == e.jdevice.which;
      });
    }

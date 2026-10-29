@@ -2154,7 +2154,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..abfe602 100644
+index 7699c3d..486b6f3 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -2188,7 +2188,44 @@ index 7699c3d..abfe602 100644
  #include <cstdio>
  #include <cstdlib>
  #include <filesystem>
-@@ -123,9 +132,28 @@ std::vector<ControllerOption> EnumerateControllers()
+@@ -101,6 +110,19 @@ std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
+   return {};
+ }
+ 
++void ConfigureSteamGamepadHints()
++{
++  SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
++  SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
++  if (std::getenv("SteamEnv") || std::getenv("SteamDeck") ||
++      std::getenv("GAMESCOPE_WAYLAND_DISPLAY") || std::getenv("SteamVirtualGamepadInfo") ||
++      std::getenv("SteamAppId") || std::getenv("SteamGameId"))
++  {
++    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "0");
++    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "0");
++  }
++}
++
+ std::vector<ControllerOption> EnumerateControllers()
+ {
+   std::vector<ControllerOption> result;
+@@ -111,9 +133,15 @@ std::vector<ControllerOption> EnumerateControllers()
+   {
+     const SDL_JoystickID joystick_id = joystick_ids[i];
+     const bool gamepad = SDL_IsGamepad(joystick_id);
++    // Match Dolphin's SDLGamepad::Gamepad() naming (SDL_GetGamepadName), which
++    // returns the underlying Steam Virtual Gamepad info name when steam_handle != 0.
++    SDL_Gamepad* pad = gamepad ? SDL_OpenGamepad(joystick_id) : nullptr;
+     const char* name_value =
+-        gamepad ? SDL_GetGamepadNameForID(joystick_id) : SDL_GetJoystickNameForID(joystick_id);
++        pad ? SDL_GetGamepadName(pad) :
++              (gamepad ? SDL_GetGamepadNameForID(joystick_id) : SDL_GetJoystickNameForID(joystick_id));
+     const std::string name = name_value && *name_value ? name_value : "Unknown Controller";
++    if (pad)
++      SDL_CloseGamepad(pad);
+     const int device_id = device_ids[name]++;
+     if (!gamepad)
+       continue;
+@@ -123,9 +151,28 @@ std::vector<ControllerOption> EnumerateControllers()
      result.emplace_back(std::move(option));
    }
    SDL_free(joystick_ids);
@@ -2217,7 +2254,7 @@ index 7699c3d..abfe602 100644
  int FindController(const std::vector<ControllerOption>& controllers, std::string_view device)
  {
    const auto found = std::ranges::find(controllers, device, &ControllerOption::device);
-@@ -153,9 +181,25 @@ fs::path DefaultUserDirectory()
+@@ -153,9 +200,25 @@ fs::path DefaultUserDirectory()
    return std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user";
  }
  
@@ -2243,7 +2280,7 @@ index 7699c3d..abfe602 100644
    if (const char* user_profile = std::getenv("USERPROFILE"))
      return fs::path(user_profile) / "Documents";
  #endif
-@@ -164,6 +208,56 @@ fs::path DocumentsDirectory()
+@@ -164,6 +227,56 @@ fs::path DocumentsDirectory()
    return fs::current_path();
  }
  
@@ -2300,7 +2337,7 @@ index 7699c3d..abfe602 100644
  fs::path ExecutableDirectory(const char* argv0)
  {
    std::error_code ec;
-@@ -204,6 +298,28 @@ bool ApplyBundledDolPatch(const fs::path& game_root, const fs::path& release_dir
+@@ -204,6 +317,28 @@ bool ApplyBundledDolPatch(const fs::path& game_root, const fs::path& release_dir
  #endif
  }
  
@@ -2329,7 +2366,7 @@ index 7699c3d..abfe602 100644
  fs::path DefaultGameFile(const fs::path& user_directory, const fs::path& release_directory)
  {
  #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
-@@ -221,8 +337,21 @@ fs::path ReadDefaultGame(const fs::path& user_directory, const fs::path& release
+@@ -221,8 +356,21 @@ fs::path ReadDefaultGame(const fs::path& user_directory, const fs::path& release
    if (!value.empty() && value.back() == '\r')
      value.pop_back();
    fs::path game(value);
@@ -2352,7 +2389,7 @@ index 7699c3d..abfe602 100644
    return game;
  }
  
-@@ -245,37 +374,43 @@ bool WriteDefaultGame(const fs::path& user_directory, const fs::path& release_di
+@@ -245,37 +393,43 @@ bool WriteDefaultGame(const fs::path& user_directory, const fs::path& release_di
    if (!ec && !relative.empty())
      stored = relative;
  #endif
@@ -2418,7 +2455,7 @@ index 7699c3d..abfe602 100644
    return images;
  }
  
-@@ -337,7 +472,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -337,7 +491,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    return output;
  #else
@@ -2431,7 +2468,7 @@ index 7699c3d..abfe602 100644
    return std::nullopt;
  #endif
  }
-@@ -380,11 +519,21 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -380,11 +538,21 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
                  disc_id);
  #endif
  #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
@@ -2457,7 +2494,7 @@ index 7699c3d..abfe602 100644
  #endif
    std::error_code ec;
    if (fs::is_directory(output, ec))
-@@ -397,19 +546,40 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -397,19 +565,40 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    const auto existing = moderngekko::InspectGame(output);
    if (existing && RequiredGameError(*existing.metadata).empty())
    {
@@ -2500,7 +2537,7 @@ index 7699c3d..abfe602 100644
    if (ec)
      return fail("can't create extraction directory: " + ec.message());
  
-@@ -464,6 +634,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -464,6 +653,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    fs::rename(staging, output, ec);
    if (ec)
      return fail("can't publish extracted game: " + ec.message());
@@ -2508,7 +2545,7 @@ index 7699c3d..abfe602 100644
    std::string error;
    if (!WriteDefaultGame(user_directory, release_directory, output, &error))
      return fail(error);
-@@ -498,12 +669,134 @@ fs::path SiblingRunner(const char* argv0)
+@@ -498,12 +688,135 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -2577,6 +2614,7 @@ index 7699c3d..abfe602 100644
 +}
 +
 +int ConfirmExitDialog(bool online) {
++  ConfigureSteamGamepadHints();
 +  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) return 2;
 +  auto* window = SDL_CreateWindow("F-ZERO GLINUX", 580, 260, SDL_WINDOW_ALWAYS_ON_TOP);
 +  auto* renderer = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
@@ -2644,7 +2682,7 @@ index 7699c3d..abfe602 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +805,23 @@ int main(int argc, char** argv)
+@@ -512,9 +825,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -2669,7 +2707,7 @@ index 7699c3d..abfe602 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +837,12 @@ int main(int argc, char** argv)
+@@ -530,6 +857,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -2682,7 +2720,13 @@ index 7699c3d..abfe602 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -547,7 +860,7 @@ int main(int argc, char** argv)
+@@ -542,12 +875,12 @@ int main(int argc, char** argv)
+ #if defined(__linux__)
+   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, use_wayland ? "wayland" : "x11");
+ #endif
+-  SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
++  ConfigureSteamGamepadHints();
+   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
      return 1;
  
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -2691,7 +2735,7 @@ index 7699c3d..abfe602 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,9 +869,20 @@ int main(int argc, char** argv)
+@@ -556,9 +889,20 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -2712,7 +2756,7 @@ index 7699c3d..abfe602 100644
    if (!renderer)
    {
      SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
-@@ -571,17 +895,27 @@ int main(int argc, char** argv)
+@@ -571,17 +915,27 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
@@ -2742,7 +2786,7 @@ index 7699c3d..abfe602 100644
    bool current_dol_changed = false;
    std::string current_dol_error;
    auto current_metadata =
-@@ -600,8 +934,18 @@ int main(int argc, char** argv)
+@@ -600,8 +954,18 @@ int main(int argc, char** argv)
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
                  config.netplay_nickname.c_str());
@@ -2763,7 +2807,7 @@ index 7699c3d..abfe602 100644
    int netplay_port = config.netplay_port;
    bool automatic_buffer = config.netplay_buffer == "auto";
    int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
-@@ -631,6 +975,13 @@ int main(int argc, char** argv)
+@@ -631,6 +995,13 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
@@ -2777,7 +2821,7 @@ index 7699c3d..abfe602 100644
    DialogState dialog;
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -639,6 +990,7 @@ int main(int argc, char** argv)
+@@ -639,6 +1010,7 @@ int main(int argc, char** argv)
    std::string selected_controller =
        configured_controllers.empty() ? config.controller : configured_controllers.front();
    int controller_index = FindController(controllers, selected_controller);
@@ -2785,7 +2829,7 @@ index 7699c3d..abfe602 100644
    std::string controller_status;
    const auto select_controller = [&](int index)
    {
-@@ -681,23 +1033,43 @@ int main(int argc, char** argv)
+@@ -681,23 +1053,43 @@ int main(int argc, char** argv)
                         " has no configured controller device";
          return false;
        }
@@ -2835,7 +2879,7 @@ index 7699c3d..abfe602 100644
      if (!controller_profile_exists)
      {
        if (controller_index < 0 && !controllers.empty())
-@@ -710,6 +1082,11 @@ int main(int argc, char** argv)
+@@ -710,6 +1102,11 @@ int main(int argc, char** argv)
        else
          controller_status = "No SDL gamepad detected";
      }
@@ -2847,7 +2891,7 @@ index 7699c3d..abfe602 100644
      else
      {
        controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
-@@ -774,14 +1151,18 @@ int main(int argc, char** argv)
+@@ -774,14 +1171,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -2869,7 +2913,7 @@ index 7699c3d..abfe602 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1201,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1221,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -2879,7 +2923,7 @@ index 7699c3d..abfe602 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1210,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1230,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -2942,7 +2986,7 @@ index 7699c3d..abfe602 100644
      }
      else
      {
-@@ -891,6 +1217,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1237,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -2950,7 +2994,7 @@ index 7699c3d..abfe602 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1267,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1287,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -2985,7 +3029,7 @@ index 7699c3d..abfe602 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1326,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1346,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -3021,7 +3065,7 @@ index 7699c3d..abfe602 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -993,18 +1367,17 @@ int main(int argc, char** argv)
+@@ -993,18 +1387,17 @@ int main(int argc, char** argv)
          const bool selected = controller_index == static_cast<int>(i);
          if (ImGui::Selectable(controllers[i].label.c_str(), selected))
          {
@@ -3044,7 +3088,7 @@ index 7699c3d..abfe602 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,67 +1385,443 @@ int main(int argc, char** argv)
+@@ -1012,67 +1405,443 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -3324,7 +3368,8 @@ index 7699c3d..abfe602 100644
 +      online_message.clear();
 +      launch_online(LaunchMode::Host);
 +    }
-+
+ 
+-    if (!extraction.running)
 +    ImGui::SeparatorText("Join a room");
 +    HintText("Paste the room code the host sent you, for example "
 +                        "FALCON-PICO-SAMURAI-ZERO.");
@@ -3347,8 +3392,7 @@ index 7699c3d..abfe602 100644
 +    }
 +    if (!online_message.empty())
 +      ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%s", online_message.c_str());
- 
--    if (!extraction.running)
++
 +    ImGui::Spacing();
 +    if (ImGui::TreeNode("Advanced: LAN / direct IP")) {
 +      HintText("Instead of a room code you can type the host's IP address in the "
@@ -3536,7 +3580,7 @@ index 7699c3d..abfe602 100644
      }
  
      {
-@@ -1090,16 +1839,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1859,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -3608,7 +3652,7 @@ index 7699c3d..abfe602 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +1922,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +1942,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -3619,7 +3663,7 @@ index 7699c3d..abfe602 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1165,6 +1973,13 @@ int main(int argc, char** argv)
+@@ -1165,6 +1993,13 @@ int main(int argc, char** argv)
        std::filesystem::create_directories(log_path.parent_path(), log_error);
        SDL_IOStream* log_stream =
            log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
@@ -3633,7 +3677,7 @@ index 7699c3d..abfe602 100644
        SDL_Process* process = nullptr;
        std::string process_error;
        if (log_stream)
-@@ -1201,9 +2016,35 @@ int main(int argc, char** argv)
+@@ -1201,9 +2036,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -3671,7 +3715,7 @@ index 7699c3d..abfe602 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +2080,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2100,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -3694,7 +3738,7 @@ index 7699c3d..abfe602 100644
            }
            else
            {
-@@ -1266,8 +2110,24 @@ int main(int argc, char** argv)
+@@ -1266,8 +2130,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
