@@ -1168,3 +1168,63 @@ text; ignore it if fetched again.
 ## Shop songs unlocked for purchase (2026-10-24)
 - New Gecko code "$Sounds of MUTE CITY & BIG BLUE for Sale": ORs 0x5 into po+0x23DA10. This is the same word shop codes 8/9 write: bit 1<<(2i) = unlocked, 1<<(2i+1) = NEW badge (not set by us). They appear under F-Zero Shop > Items for 99 tickets. To race with a remix, press Z when choosing a Mute City or Big Blue course (per StrategyWiki). The normal music is not replaced.
 - Test checks the new enable entry. Not yet verified in game, because the user's session was running at the time.
+
+## Release 0.9.2: European PAL (GFZP01), Windows Hotfixes & Gecko Code Alignment (2026-10-29)
+
+### 1. European PAL (`GFZP01`) Dual-Disc Support
+- **Multi-Region Disc Detection & Extraction**:
+  - `moderngekko_launcher.cpp` and `moderngekko_run.cpp` updated with `IsAllowedDiscId` to support both `GFZE01` (NTSC-U) and `GFZP01` (PAL) ISO/RVZ disc images.
+  - Disc preparation extracts and identifies PAL file systems, storing extracted assets in adjacent `GFZP01` folders.
+- **Native 60Hz Default (PAL60 / EuRGB60)**:
+  - GameCube SRAM template sets `EURGB60 = 0x20` flag by default.
+  - `frontend_config.cpp` automatically injects `[Core]\nPAL60 = True` into `GameSettings/GFZP01.ini`.
+  - On startup, the game bypasses manual 50Hz/60Hz selector navigation and runs smoothly at full 60 FPS.
+- **Single-Controller 2026 Gold Parts Cheat for PAL**:
+  - Located the 180-byte (`5 × 36`) Gold Parts button sequence cheat table in PAL overlay module `files/fzp.customize.rel` at offset **`0x30728`** (compared to `0x2E7F4` in NTSC-U `fze.customize.rel`).
+  - `PatchRelGoldCheats` dynamically applies the single-controller patch to whichever overlay module is present (`fze.*` or `fzp.*`).
+- **Dynamic Save-Data Unlocks & Memory Offsets**:
+  - Mapped the save unlock memory block inside PAL's `_Main.rel`, which is shifted by **`+0xACE8`** relative to `po = [0x800030C8]`:
+    - Tickets (99,999): `po+0x2486E0` (vs `po+0x23D9F8` in NTSC-U)
+    - Machines (AX + Dark Schneider): `po+0x243E00` / `po+0x243E04` (vs `po+0x239118` / `po+0x23911C`)
+    - Custom Parts (including 15 Gold Parts): `po+0x243E08` / `po+0x243E0C` / `po+0x243E14` (vs `po+0x239120` / `po+0x239124` / `po+0x23912C`)
+    - Cups & Chapters: `po+0x2486EC` / `po+0x2486EE` / `po+0x2486F0` (vs `po+0x23DA04` / `po+0x23DA06` / `po+0x23DA08`)
+    - Staff Ghosts: `po+0x2486E8` (vs `po+0x23DA00`)
+    - Shop Songs (Mute City & Big Blue remixes): `po+0x2486F8` (vs `po+0x23DA10`)
+  - `EnsureCheatsConfigured` automatically writes matched unlock codes to both `GFZE01.ini` and `GFZP01.ini`.
+- **CPU Core Execution**:
+  - ModernGekko runner configures PAL games to execute on Dolphin's 64-bit JIT compiler (`MAIN_CPU_CORE`), while maintaining StaticRecomp support for NTSC-U.
+
+### 2. Consolidated Windows Hotfixes (from 0.9.1-beta1)
+- **Adjacent Extraction**: Extracted game directory placed directly beside the ISO/RVZ disc image (with automatic fallback to AppData if the source medium is read-only).
+- **NTFS Directory Junction Fallback**: When `CreateSymbolicLinkW` fails with `ERROR_PRIVILEGE_NOT_HELD` on standard Windows user accounts, the launcher automatically creates NTFS Directory Junctions (`IO_REPARSE_TAG_MOUNT_POINT`), allowing texture packs and mods to work without running as Administrator.
+- **Boost Layout File Lock**: Closed `std::ifstream` handle before replacing `GCPadNew.ini`, resolving "Access is denied" when toggling "Use X for Boost". Added keyboard boost swap (`C`/`S`).
+- **Startup Freezes**: Removed synchronous 4-level recursive scans across `Documents` and cloud-synced OneDrive paths.
+- **Window & Input Focus**: Added foreground window focus handoff (`AllowSetForegroundWindow` + `SetForegroundWindow` / `SetFocus`) when dismissing the Escape quit confirmation prompt, entering fullscreen, or exiting.
+- **Application Branding**: Added high-res embedded icons and DPI-aware manifests (`moderngekko.manifest`).
+
+### 3. Linux / SteamOS / Bazzite Stability
+- **X11 / KWin BadMatch Crash**: Replaced premature `XSetInputFocus` calls with standard ICCCM `XWMHints` input focus hints, eliminating the crash on Bazzite and KWin XWayland.
+- **SteamOS Gaming Mode Detection**: Enabled Steam Input virtual gamepad detection (`SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1`) and background joystick event polling.
+- **GameCube Controller Adapter Unbinding**: Released SDL joystick and gamepad subsystems (`SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)`) prior to spawning the runner process, preventing USB interface lock conflicts on official and Mayflash GameCube adapters.
+
+### 4. Gecko Codes Investigation & Alignment
+- **Root Cause of Inactive Gecko Codes**:
+  - Dolphin's `GeckoCodeConfig.cpp` splits code titles at the author delimiter `[` when parsing `[Gecko]`, setting `gcode.name` to `"Play F-Zero AX Arcade Mode (v8)"` (without ` [Ralf]`).
+  - Dolphin's `ReadEnabledOrDisabled` compares `line.compare(1, std::string::npos, code.name) == 0`.
+  - The launcher previously wrote the full title including `[Ralf]` into `[Gecko_Enabled]`, causing string equality checks to fail and leaving all Ralf codes disabled.
+- **Fix Applied**:
+  - Implemented `gecko_name_without_creator` in `frontend_config.cpp` to write both creator-tagged and stripped titles under `[Gecko_Enabled]`.
+  - Re-verified test suite: `moderngekko.frontend_config` and `moderngekko.frontend_config_gamecube` passed 100%.
+- **Experimental Notice**:
+  - Explicitly labeled local gameplay Gecko codes as **Experimental - A work in progress** across the launcher UI, documentation, and issues tracker.
+
+### 5. Packaging & Publication
+- **Linux AppImage (Ubuntu 22.04 LTS / glibc 2.35 portable baseline)**:
+  - File: `F-ZERO-GLINUX-0.9.2-glibc2.35-x86_64.AppImage` (32,750,072 bytes)
+  - SHA-256: `f142ddc3f4eae0a2ab6a4e705f5a3bc0143744d358ce9316b88954e90652d38f`
+  - Verified across Ubuntu 24.04, Ubuntu 22.04, Debian 12, and Fedora 40.
+- **Windows Portable Package (Windows 10 / 11 x64)**:
+  - File: `F-ZERO-GLINUX-0.9.2-windows-x64.zip` (23,614,696 bytes)
+  - SHA-256: `3d126de464b5469f973f6ee5e1afad69449a2791bf6784d1c4313ed9705a31fd`
+- **Published**:
+  - Pushed to `glinux/main` and created GitHub release `v0.9.2` (Latest) at `https://github.com/Mabec-games/F-ZERO-GLINUX/releases/tag/v0.9.2`.
