@@ -1002,7 +1002,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..101c3df 100644
+index 03740d4..535198f 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1894,7 +1894,7 @@ index 03740d4..101c3df 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +1211,377 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1211,398 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -2096,13 +2096,26 @@ index 03740d4..101c3df 100644
 +  auto format_gecko_header = [](std::string_view name) -> std::string {
 +    return name.starts_with('$') ? std::string(name) : ("$" + std::string(name));
 +  };
++  auto gecko_name_without_creator = [](std::string_view name) -> std::string {
++    std::string s(name.starts_with('$') ? name.substr(1) : name);
++    const auto bracket = s.find('[');
++    if (bracket != std::string::npos) {
++      s = s.substr(0, bracket);
++    }
++    return "$" + Trim(s);
++  };
 +  const auto is_managed = [&](const std::string &name) {
 +    if (std::ranges::find(unlock_codes, name) != unlock_codes.end() ||
 +        std::ranges::find(legacy_codes, name) != legacy_codes.end()) {
 +      return true;
 +    }
++    for (const auto &c : unlock_codes) {
++      if (gecko_name_without_creator(c) == name)
++        return true;
++    }
 +    return std::ranges::any_of(supported_local, [&](const LocalGeckoCodeOption &opt) {
-+      return format_gecko_header(opt.ini_name) == name;
++      return format_gecko_header(opt.ini_name) == name ||
++             gecko_name_without_creator(opt.ini_name) == name;
 +    });
 +  };
 +  // Action Replay codes from earlier builds that freeze the intro screens.
@@ -2169,14 +2182,22 @@ index 03740d4..101c3df 100644
 +    insert_after_header("[Gecko]", all_defs);
 +
 +    std::string enabled_names;
++    const auto append_enabled_entry = [&](const std::string &raw_entry) {
++      const std::string full = format_gecko_header(raw_entry);
++      const std::string stripped = gecko_name_without_creator(raw_entry);
++      enabled_names += full + "\n";
++      if (stripped != full) {
++        enabled_names += stripped + "\n";
++      }
++    };
 +    if (unlocks_enabled) {
 +      for (const auto &c : unlock_codes)
-+        enabled_names += c + "\n";
++        append_enabled_entry(c);
 +    }
 +    for (const LocalGeckoCodeOption *opt : active_local_options) {
 +      const std::string_view body = is_pal ? opt->pal_body : opt->ntsc_u_body;
 +      if (!body.empty())
-+        enabled_names += format_gecko_header(opt->ini_name) + "\n";
++        append_enabled_entry(std::string(opt->ini_name));
 +    }
 +    if (!enabled_names.empty()) {
 +      insert_after_header("[Gecko_Enabled]", enabled_names);
@@ -2970,7 +2991,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..9787cde 100644
+index 7699c3d..ea30c83 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -3966,7 +3987,7 @@ index 7699c3d..9787cde 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,67 +1440,495 @@ int main(int argc, char** argv)
+@@ -1012,67 +1440,496 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -4175,8 +4196,9 @@ index 7699c3d..9787cde 100644
 +      ImGui::TextWrapped("Applied automatically when the game starts (works in both Local Play and Online rooms): 99,999 tickets, all cups including the AX Cup, every machine including the AX machines and Dark Schneider, every custom part including the 15 Gold Parts, all Staff Ghosts, all Story Mode chapters & finale movies, and the Sounds of MUTE CITY and Sounds of BIG BLUE songs (F-Zero Shop > Items, 99 tickets; press Z when choosing a Mute City or Big Blue course to race with the remix). Buy the parts in the F-Zero Shop > Custom Parts, where they cost 15 tickets each and use their part names (Rage Knight, Hyper Stream, Velocity -J and so on, listed below), not the machine names.");
 +      ImGui::Spacing();
 +
-+      ImGui::SeparatorText("Local Gameplay Gecko Codes (Offline Only)");
++      ImGui::SeparatorText("Local Gameplay Gecko Codes (Experimental - Work in Progress)");
 +      HintText("Optional Gecko codes by Ralf (gc-forever / Dolphin forums) for NTSC-U and PAL. "
++               "NOTE: Local Gecko codes are experimental and a work in progress; some codes may not take effect across all setups. "
 +               "Active only in Local Play — automatically disabled when hosting or joining an Online room.");
 +      const auto &local_gecko_options =
 +          moderngekko::frontend::SupportedLocalGeckoCodes();
@@ -4510,7 +4532,7 @@ index 7699c3d..9787cde 100644
      }
  
      {
-@@ -1090,16 +1946,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1947,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -4582,7 +4604,7 @@ index 7699c3d..9787cde 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +2029,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +2030,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -4593,7 +4615,7 @@ index 7699c3d..9787cde 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1165,6 +2080,13 @@ int main(int argc, char** argv)
+@@ -1165,6 +2081,13 @@ int main(int argc, char** argv)
        std::filesystem::create_directories(log_path.parent_path(), log_error);
        SDL_IOStream* log_stream =
            log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
@@ -4607,7 +4629,7 @@ index 7699c3d..9787cde 100644
        SDL_Process* process = nullptr;
        std::string process_error;
        if (log_stream)
-@@ -1201,9 +2123,35 @@ int main(int argc, char** argv)
+@@ -1201,9 +2124,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -4645,7 +4667,7 @@ index 7699c3d..9787cde 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +2187,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2188,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -4668,7 +4690,7 @@ index 7699c3d..9787cde 100644
            }
            else
            {
-@@ -1266,8 +2217,24 @@ int main(int argc, char** argv)
+@@ -1266,8 +2218,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();

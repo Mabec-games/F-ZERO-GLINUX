@@ -35,7 +35,7 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
-- **Unlock everything & Local Gecko Codes:** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 15 optional Ralf Gecko codes for Local Play (automatically disabled in Online rooms).
+- **Unlock everything & Local Gecko Codes (Experimental):** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 15 optional Ralf Gecko codes for Local Play (*Experimental - A work in progress*; automatically disabled in Online rooms).
 - **Windows build:** a portable zip for Windows 10/11, with the same launcher and features.
 
 The current target is the game's normal **60 FPS** operation.
@@ -264,7 +264,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
 | Mods | HD texture packs and Dolphin graphics mods from any folder |
-| Unlockables & Cheats | Automatic unlocks (all machines, cups, Gold Parts, shop songs, staff ghosts) + local Gecko codes |
+| Unlockables & Cheats | Automatic unlocks (all machines, cups, Gold Parts, shop songs, staff ghosts) + local Gecko codes (*Experimental - Work in progress*) |
 
 Report problems with your package type, distro, graphics backend, GPU and gamepad,
 along with the relevant log. 
