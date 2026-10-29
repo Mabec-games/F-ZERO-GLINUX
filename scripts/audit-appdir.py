@@ -41,7 +41,7 @@ A build on an older baseline is required to lower this requirement.
 ISA requirements below can impose additional CPU restrictions.
 
 No ISO/RVZ, extracted game, native game module or personal saves are included.
-Import your own USA game (GFZE01), ISO or RVZ, in the launcher. CPU execution uses Dolphin JIT.
+Import your own USA (GFZE01) or PAL (GFZP01) game, ISO or RVZ, in the launcher. CPU execution uses Dolphin JIT.
 Data: $XDG_DATA_HOME/fzero-glinux (default ~/.local/share/fzero-glinux).
 Override data location with GLINUX_USER_DIR, or explicit --user-dir PATH.
 If FUSE is unavailable: ./F-ZERO-GLINUX-....AppImage --appimage-extract-and-run

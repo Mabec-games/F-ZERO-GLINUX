@@ -19,12 +19,13 @@ controller options around a Dolphin-derived runtime.
 Static recompilation with JIT through ModernGekko remains
 experimental; these packages are not a completed static recompilation release.
 
-Bring your own **F-ZERO GX USA (GFZE01)** image in **ISO or RVZ** format. Game
+Bring your own **F-ZERO GX USA (`GFZE01`) or PAL (`GFZP01`)** image in **ISO or RVZ** format. Game
 disc contents and personal memory-card saves are not included in the packages.
 **WIP, Issues may occur, blame the robots... but if it works its all thanks to me.**
 
 ## Built for the starting grid
 
+- **USA (`GFZE01`) & PAL (`GFZP01`) support:** import either region's ISO or RVZ; PAL boots with 60Hz (`EuRGB60`) enabled for full 60 FPS gameplay.
 - **Controller-friendly launcher** with racing artwork, gamepad navigation and clear loading feedback.
 - **Six resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1440p and 4K.
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
@@ -34,7 +35,7 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
-- **Unlock everything:** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part and shop song, with no button codes.
+- **Unlock everything & Local Gecko Codes:** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 15 optional Ralf Gecko codes for Local Play (automatically disabled in Online rooms).
 - **Windows build:** a portable zip for Windows 10/11, with the same launcher and features.
 
 The current target is the game's normal **60 FPS** operation.
@@ -187,7 +188,7 @@ minutes on slower GPUs; later starts are fast.
 
 ### First launch
 
-1. Select **Browse for ISO / RVZ** and import your USA game image. For Flatpak, use Downloads.
+1. Select **Browse for ISO / RVZ** and import your USA (`GFZE01`) or PAL (`GFZP01`) game image. For Flatpak, use Downloads. PAL versions automatically run with 60Hz mode enabled.
 2. Open **Controller**, choose your gamepad and optionally enable **Boost on X**.
 3. Choose your graphics settings, then press **PLAY**. The loading screen stays visible while the game starts.
 4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 display setting in the launcher.
@@ -255,6 +256,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Area | Status |
 |---|---|
 | AppImage and Flatpak | Working on the project owner's development machine |
+| Game versions | NTSC-U (`GFZE01`) and PAL (`GFZP01`) supported (PAL runs at 60Hz) |
 | JIT gameplay | Playable; smooth 60 FPS reported on that machine |
 | Static recompilation | Experimental; performance work remains |
 | Native widescreen | In-game setting; remembered in the player's save |
@@ -262,7 +264,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
 | Mods | HD texture packs and Dolphin graphics mods from any folder |
-| Unlockables | Automatic; tickets, cups, machines, Gold Parts and shop songs confirmed in game |
+| Unlockables & Cheats | Automatic unlocks (all machines, cups, Gold Parts, shop songs, staff ghosts) + local Gecko codes |
 
 Report problems with your package type, distro, graphics backend, GPU and gamepad,
 along with the relevant log. 

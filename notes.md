@@ -1,9 +1,32 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-10-25.
+Updated: 2026-10-29.
 
 
-## Latest update — Windows 0.9 fix: fullscreen at start, drives in the file browser, 2026-10-25
+## Latest update — Release 0.9.2: PAL (GFZP01) Support, Local Gecko Cheats & Beta Hotfixes Rollup, 2026-10-29
+
+1. **PAL (`GFZP01`) Support**:
+   - **Dual Disc ID Validation**: Configured `-DMODERNGEKKO_REQUIRED_DISC_ID="GFZE01,GFZP01"` across `build-glinux.sh`, `build-windows.ps1`, `package-windows.ps1`, and `audit-appdir.py`. Both `moderngekko_launcher.cpp` and `moderngekko_run.cpp` parse comma-separated disc ID lists and accept either `GFZE01` or `GFZP01`.
+   - **50Hz/60Hz Mode**: `EnsureCheatsConfigured` automatically writes `[Core]\nPAL60 = True\n` into `GameSettings/GFZP01.ini`. Combined with Dolphin's default SRAM `EURGB60` flag (`0x20`), PAL boots into 60Hz mode for full 60 FPS gameplay.
+   - **Gold Parts Patching**: Updated `PatchRelGoldCheats` to patch `files/fzp.customize.rel` at offset `0x30728` (changing 4-controller button mask requirements to 1-controller) alongside `files/fze.customize.rel` at offset `0x2E7F4`.
+   - **Widescreen Save Seeding**: `InitializeWidescreenProfile` seeds `GC/EUR/Card A/8P-GFZP-f_zero.dat.gci` (with PAL header `GFZP8P`) alongside the USA card.
+   - **Automatic JIT Fallback**: When running `GFZP01` (which has no static recompilation module), `dolphin_runtime.cpp` and `netplay_session.cpp` automatically fall back to Dolphin JIT without failing.
+   - **Verified**: Tested extraction and boot using real GameCube PAL ISO (`F-Zero GX (EU) (2003) (Racing) (GameCube).iso`); extraction and headless boot completed cleanly.
+
+2. **Curated Ralf Gecko Codes for Local Play**:
+   - Added 15 curated Ralf Gecko cheats into `GameSettings/GFZE01.ini` and `GameSettings/GFZP01.ini` (e.g. F-Zero AX Arcade Mode v8, Story Mode Cup, VS Battle without extra controllers, Infinite Boost & Energy, Lap 1 Booster, Track Recovery, Super Top Speed, 16:9 Widescreen Camera FOV fix).
+   - In NetPlay sessions, local Gecko codes are automatically stripped to preserve online game sync, while official unlocks (tickets, cups, machines, gold parts) remain active.
+
+3. **Beta Hotfixes Included (from `beta-0.9.1`)**:
+   - **Issue #1 (SteamOS/Bazzite `X_SetInputFocus` crash & Steam Input)**: Removed premature `XSetInputFocus` after `XMapRaised` before `MapNotify` to prevent fatal X11 `BadMatch` on KWin/Bazzite. Enabled `background_input = true` by default. Configured `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1` and unified launcher/runner controller naming under Steam Input.
+   - **Issue #8 (GameCube Controller lock)**: Launcher calls `SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)` before launching runner to release exclusive libusb/WinUSB adapter claims.
+   - **Issue #3 (Windows `SetBoostLayout` lock)**: Explicitly closed file input streams before `fs::rename` to prevent Windows `ERROR_ACCESS_DENIED`.
+   - **Issue #9 (Windows custom textures)**: Fall back to NTFS Directory Junctions when standard non-admin users lack `SeCreateSymbolicLinkPrivilege`.
+   - **Issue #10 (Freeze on startup)**: Removed synchronous recursive scan of Documents on the UI thread.
+   - **Issue #4 (Launcher ISO prompt)**: Hides "No ISO selected" and Browse buttons when an extracted game is already configured and ready.
+
+
+## Previous update — Windows 0.9 fix: fullscreen at start, drives in the file browser, 2026-10-25
 
 User-confirmed on Windows before this: launcher, gamepad and audio work; Direct3D 11 and Vulkan both play. The public v0.9 Windows zip and `.sha256` were replaced (`--clobber`, same names) and a fix note was added at the top of the release text. New zip SHA-256 `58a9e44cfe7e52f30ba19003b645587ecc9fb628edae8afa6546685ee7a58dac`; downloaded back from GitHub and `sha256sum -c` passes. Linux assets untouched. Dev commits c4554da, 305b87b, fd6ae24, 368d814 (code is in dev only, not pushed to the public repo).
 

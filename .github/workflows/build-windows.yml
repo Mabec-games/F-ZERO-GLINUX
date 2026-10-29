@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Package version suffix (e.g. 0.9-beta1)'
+        description: 'Package version suffix (e.g. 0.9.2)'
         required: false
-        default: '0.9-beta1'
+        default: '0.9.2'
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -73,7 +73,7 @@ jobs:
             if ("$env:GITHUB_REF" -like "refs/tags/v*") {
               $version = $env:GITHUB_REF_NAME.TrimStart('v')
             } else {
-              $version = "0.9-beta1"
+              $version = "0.9.2"
             }
           }
           powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Version $version

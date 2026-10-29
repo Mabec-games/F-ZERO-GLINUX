@@ -38,8 +38,8 @@ foreach ($dll in 'msvcp140.dll', 'msvcp140_atomic_wait.dll', 'vcruntime140.dll',
 F-ZERO GLINUX $Version for Windows (x64)
 
 1. Run "F-ZERO GLINUX.exe".
-2. Click "Browse for ISO / RVZ" and pick your own F-Zero GX (USA, GFZE01) disc image.
-   It is extracted once into a "GFZE01" folder right next to your ISO/RVZ; the original file is not changed.
+2. Click "Browse for ISO / RVZ" and pick your own F-Zero GX (USA GFZE01 or PAL GFZP01) disc image.
+   It is extracted once into a "GFZE01" or "GFZP01" folder right next to your ISO/RVZ; the original file is not changed.
 3. Pick your controller under CONTROLLER, then PLAY.
 
 Escape (or Guide / Start+Back on a gamepad) asks before quitting.

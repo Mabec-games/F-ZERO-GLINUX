@@ -43,7 +43,7 @@ cmake -S lib/ModernGekko -B lib/ModernGekko/build -G Ninja \
     "-DMODERNGEKKO_DEFAULT_WINDOW_TITLE=F-ZERO GLINUX" \
     -DMODERNGEKKO_USER_DIRECTORY_NAME=fzero-glinux \
     -DMODERNGEKKO_GAMECUBE_CONTROLLERS=ON \
-    -DMODERNGEKKO_REQUIRED_DISC_ID=GFZE01 \
+    -DMODERNGEKKO_REQUIRED_DISC_ID="GFZE01,GFZP01" \
     ${GLINUX_CMAKE_ARGS:-} \
     "${protocol_args[@]}"
 cmake --build lib/ModernGekko/build --target moderngekko-port moderngekko-launcher -j"$jobs"
