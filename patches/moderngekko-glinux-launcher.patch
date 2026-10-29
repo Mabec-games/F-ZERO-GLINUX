@@ -515,10 +515,10 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..1e3e73f 100644
+index 6bb9e0e..dfdd84e 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
-@@ -1,4 +1,7 @@
+@@ -1,8 +1,12 @@
  #include "frontend_config.hpp"
 +#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 +#include "graphics_mods.hpp"
@@ -526,7 +526,12 @@ index 6bb9e0e..1e3e73f 100644
  
  #include <chrono>
  #include <filesystem>
-@@ -21,6 +24,50 @@ int main() {
+ #include <fstream>
++#include <iostream>
+ #include <iterator>
+ #include <string>
+ 
+@@ -21,6 +25,50 @@ int main() {
             std::chrono::steady_clock::now().time_since_epoch().count()));
  
    std::string error;
@@ -577,7 +582,7 @@ index 6bb9e0e..1e3e73f 100644
    const std::string controller = "SDL/0/Test Controller";
    if (!moderngekko::frontend::SaveConfig(directory, "1920x1080", false,
                                           controller, &error))
-@@ -29,10 +76,59 @@ int main() {
+@@ -29,10 +77,59 @@ int main() {
    const auto loaded = moderngekko::frontend::LoadConfig(directory, false);
    if (!loaded || loaded.dolphin_scale != 3 || loaded.show_fps_in_title ||
        loaded.controller != controller ||
@@ -638,7 +643,7 @@ index 6bb9e0e..1e3e73f 100644
    moderngekko::frontend::ConfigResult netplay_config = loaded;
    netplay_config.graphics_backend = "OpenGL";
    netplay_config.fullscreen = true;
-@@ -89,7 +185,7 @@ int main() {
+@@ -89,7 +186,7 @@ int main() {
    }
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
    if (!generated.contains("Buttons/A = `Button A`\n") ||
@@ -647,7 +652,7 @@ index 6bb9e0e..1e3e73f 100644
        !generated.contains("Main Stick/Up = `Left Y+`\n") ||
        !generated.contains("C-Stick/Up = `Right Y+`\n") ||
        !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
-@@ -114,6 +210,31 @@ int main() {
+@@ -114,6 +211,31 @@ int main() {
  #endif
  
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
@@ -679,7 +684,7 @@ index 6bb9e0e..1e3e73f 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +259,260 @@ int main() {
+@@ -138,6 +260,260 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -716,9 +721,9 @@ index 6bb9e0e..1e3e73f 100644
 +  const auto enabled_codes = [&] {
 +    std::ifstream in(directory / "GameSettings" / "GFZE01.ini");
 +    std::string gfz_ini((std::istreambuf_iterator<char>(in)), {});
-+    const auto pos = gfz_ini.find("[Gecko_Enabled]\n");
++    const auto pos = gfz_ini.find("[Gecko_Enabled]");
 +    if (pos == std::string::npos) return std::string{};
-+    const auto end = gfz_ini.find('[', pos + 1);
++    const auto end = gfz_ini.find("\n[", pos + 1);
 +    return gfz_ini.substr(pos, end == std::string::npos ? end : end - pos);
 +  };
 +  if (enabled_codes().contains('$')) return 85;
@@ -730,11 +735,11 @@ index 6bb9e0e..1e3e73f 100644
 +    return 86;
 +  {
 +    const std::string enabled = enabled_codes();
-+    if (!enabled.contains("$Max Tickets (99,999)\n") ||
-+        !enabled.contains("$All Machines Unlocked (AX + Dark Schneider)\n") ||
-+        !enabled.contains("$All Custom Parts Unlocked (Gold Parts included)\n") ||
-+        !enabled.contains("$All Cups Unlocked (AX Cup included)\n") ||
-+        !enabled.contains("$Sounds of MUTE CITY & BIG BLUE for Sale\n"))
++    if (!enabled.contains("$Max Tickets (99,999)") ||
++        !enabled.contains("$All Machines Unlocked (AX + Dark Schneider)") ||
++        !enabled.contains("$All Custom Parts Unlocked (Gold Parts included)") ||
++        !enabled.contains("$All Cups Unlocked (AX Cup included)") ||
++        !enabled.contains("$Sounds of MUTE CITY & BIG BLUE for Sale"))
 +      return 87;
 +    std::ifstream in(directory / "GameSettings" / "GFZE01.ini");
 +    std::string gfz_ini((std::istreambuf_iterator<char>(in)), {});
@@ -748,7 +753,7 @@ index 6bb9e0e..1e3e73f 100644
 +    if (moderngekko::frontend::SupportedLocalGeckoCodes().size() < 15)
 +      return 110;
 +    cheats_cfg.cheats = false;
-+    cheats_cfg.local_gecko_codes = {"all_30_time_attack", "cpu_max_speed"};
++    cheats_cfg.local_gecko_codes = {"boost_from_lap_1", "track_restore"};
 +    if (!moderngekko::frontend::SaveConfig(directory, cheats_cfg, &error))
 +      return 111;
 +    const auto reloaded_gecko =
@@ -765,16 +770,16 @@ index 6bb9e0e..1e3e73f 100644
 +        return 113;
 +    }
 +    const std::string local_enabled = enabled_codes();
-+    if (local_enabled.contains("$Max Tickets (99,999)\n") ||
-+        !local_enabled.contains("$Enable 30 Machines in Time Attack Mode [Ralf]\n") ||
-+        !local_enabled.contains("$CPU Machines Use Max Possible Speed [Ralf]\n"))
++    if (local_enabled.contains("$Max Tickets (99,999)") ||
++        !local_enabled.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]") ||
++        !local_enabled.contains("$Track Recovery on Fall-Off (All Modes) [Ralf]"))
 +      return 114;
 +    // Verify PAL GFZP01.ini is also generated with PAL offsets and local codes.
 +    {
 +      std::ifstream in_pal(directory / "GameSettings" / "GFZP01.ini");
 +      std::string gfz_pal_ini((std::istreambuf_iterator<char>(in_pal)), {});
 +      if (!gfz_pal_ini.contains("142486E0 0001869F") ||
-+          !gfz_pal_ini.contains("$Enable 30 Machines in Time Attack Mode [Ralf]\n"))
++          !gfz_pal_ini.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]"))
 +        return 115;
 +    }
 +    // Online (NetPlay) mode must strip local Gecko codes while keeping unlocks
@@ -796,9 +801,9 @@ index 6bb9e0e..1e3e73f 100644
 +      return 118;
 +    {
 +      const std::string online_unlocks_only = enabled_codes();
-+      if (!online_unlocks_only.contains("$Max Tickets (99,999)\n") ||
-+          !online_unlocks_only.contains("$All Staff Ghosts Unlocked [Ralf]\n") ||
-+          online_unlocks_only.contains("$Enable 30 Machines in Time Attack Mode [Ralf]\n"))
++      if (!online_unlocks_only.contains("$Max Tickets (99,999)") ||
++          !online_unlocks_only.contains("$All Staff Ghosts Unlocked [Ralf]") ||
++          online_unlocks_only.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]"))
 +        return 119;
 +      std::ifstream in_pal(directory / "GameSettings" / "GFZP01.ini");
 +      std::string gfz_pal_ini((std::istreambuf_iterator<char>(in_pal)), {});
@@ -997,7 +1002,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..94e2356 100644
+index 03740d4..101c3df 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1889,7 +1894,7 @@ index 03740d4..94e2356 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +1211,374 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1211,377 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -2088,13 +2093,16 @@ index 03740d4..94e2356 100644
 +      "$Unlock AX Cup Tracks",
 +      "$All Vehicles Unlocked",
 +  };
++  auto format_gecko_header = [](std::string_view name) -> std::string {
++    return name.starts_with('$') ? std::string(name) : ("$" + std::string(name));
++  };
 +  const auto is_managed = [&](const std::string &name) {
 +    if (std::ranges::find(unlock_codes, name) != unlock_codes.end() ||
 +        std::ranges::find(legacy_codes, name) != legacy_codes.end()) {
 +      return true;
 +    }
 +    return std::ranges::any_of(supported_local, [&](const LocalGeckoCodeOption &opt) {
-+      return "$" + std::string(opt.ini_name) == name;
++      return format_gecko_header(opt.ini_name) == name;
 +    });
 +  };
 +  // Action Replay codes from earlier builds that freeze the intro screens.
@@ -2138,7 +2146,7 @@ index 03740d4..94e2356 100644
 +      const std::string_view body = is_pal ? opt.pal_body : opt.ntsc_u_body;
 +      if (body.empty())
 +        continue;
-+      all_defs += "$" + std::string(opt.ini_name) + "\n";
++      all_defs += format_gecko_header(opt.ini_name) + "\n";
 +      all_defs += body;
 +      if (!all_defs.ends_with('\n'))
 +        all_defs += '\n';
@@ -2168,7 +2176,7 @@ index 03740d4..94e2356 100644
 +    for (const LocalGeckoCodeOption *opt : active_local_options) {
 +      const std::string_view body = is_pal ? opt->pal_body : opt->ntsc_u_body;
 +      if (!body.empty())
-+        enabled_names += "$" + std::string(opt->ini_name) + "\n";
++        enabled_names += format_gecko_header(opt->ini_name) + "\n";
 +    }
 +    if (!enabled_names.empty()) {
 +      insert_after_header("[Gecko_Enabled]", enabled_names);
