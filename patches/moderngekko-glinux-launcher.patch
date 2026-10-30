@@ -515,7 +515,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..dfdd84e 100644
+index 6bb9e0e..52978ca 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -684,7 +684,7 @@ index 6bb9e0e..dfdd84e 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +260,260 @@ int main() {
+@@ -138,6 +260,357 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -809,6 +809,103 @@ index 6bb9e0e..dfdd84e 100644
 +      std::string gfz_pal_ini((std::istreambuf_iterator<char>(in_pal)), {});
 +      if (!gfz_pal_ini.contains("PAL60 = True"))
 +        return 120;
++    }
++    // INIs written before v0.9.2 carry "$$" headers that Dolphin never
++    // enables; they must be dropped and replaced by single-'$' entries.
++    for (const char *name : {"GFZE01.ini", "GFZP01.ini"}) {
++      std::ofstream out(directory / "GameSettings" / name, std::ios::trunc);
++      out << "[Gecko]\n$$Enable Booster From Lap 1 (All Modes) [Ralf]\n"
++             "04000000 00000000\n"
++             "[Gecko_Enabled]\n$$Enable Booster From Lap 1 (All Modes) [Ralf]\n";
++    }
++    if (!moderngekko::frontend::EnsureCheatsConfigured(
++            directory, /*unlocks_enabled=*/false,
++            std::vector<std::string>{"boost_from_lap_1"},
++            /*allow_local_gecko_codes=*/true, &error))
++      return 201;
++    for (const char *name : {"GFZE01.ini", "GFZP01.ini"}) {
++      std::ifstream in(directory / "GameSettings" / name);
++      std::string ini((std::istreambuf_iterator<char>(in)), {});
++      if (ini.contains("$$") || ini.contains("04000000 00000000") ||
++          !ini.contains("[Gecko_Enabled]\n$Enable Booster From Lap 1 (All Modes) [Ralf]\n"
++                        "$Enable Booster From Lap 1 (All Modes)\n"))
++        return 202;
++    }
++    // Experimental steering wheel: settings round-trip, the profile maps the
++    // wheel's axes onto Dolphin's wheel inputs, and port 1 switches type.
++    {
++      using moderngekko::frontend::ValidWheelAxis;
++      if (!ValidWheelAxis("Axis 0+") || !ValidWheelAxis("Full Axis 12-") ||
++          ValidWheelAxis("Axis +") || ValidWheelAxis("Axis 1") ||
++          ValidWheelAxis("Button 1") || ValidWheelAxis("Axis 1234+"))
++        return 210;
++      auto wheel_cfg = moderngekko::frontend::LoadConfig(directory, false);
++      wheel_cfg.steering_wheel = true;
++      wheel_cfg.wheel_device = "SDL/0/Test Wheel";
++      wheel_cfg.controller = wheel_cfg.wheel_device;
++      wheel_cfg.controllers = {wheel_cfg.wheel_device};
++      wheel_cfg.wheel_steering = "Axis 0-";
++      wheel_cfg.wheel_gas = "Full Axis 2-";
++      wheel_cfg.wheel_brake = "Axis 5+";
++      wheel_cfg.wheel_force_reverse = true;
++      if (!moderngekko::frontend::SaveConfig(directory, wheel_cfg, &error))
++        return 211;
++      const auto wheel_loaded = moderngekko::frontend::LoadConfig(directory, false);
++      if (!wheel_loaded.steering_wheel ||
++          wheel_loaded.wheel_device != wheel_cfg.wheel_device ||
++          wheel_loaded.wheel_steering != "Axis 0-" ||
++          wheel_loaded.wheel_gas != "Full Axis 2-" ||
++          wheel_loaded.wheel_brake != "Axis 5+" || !wheel_loaded.wheel_force_reverse)
++        return 212;
++#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
++      if (!moderngekko::frontend::GenerateWheelConfig(directory, wheel_loaded, &error))
++        return 213;
++      {
++        std::ifstream in(directory / "Config" / "GCPadNew.ini");
++        std::string pad((std::istreambuf_iterator<char>(in)), {});
++        if (!pad.contains("Device = SDL/0/Test Wheel\n") ||
++            !pad.contains("Main Stick/Left = `Axis 0+`\n") ||
++            !pad.contains("Main Stick/Right = `Axis 0-`\n") ||
++            !pad.contains("Main Stick/Up = `Full Axis 2-`\n") ||
++            !pad.contains("C-Stick/Up = `Axis 5+`\n") ||
++            !pad.contains("Rumble/Motor = Constant\nRumble/Motor/Range = -100.00\n"))
++          return 214;
++      }
++      auto bad_wheel = wheel_loaded;
++      bad_wheel.wheel_steering = "Full Axis 0+";
++      if (moderngekko::frontend::GenerateWheelConfig(directory, bad_wheel, &error))
++        return 215;
++#else
++      if (moderngekko::frontend::GenerateWheelConfig(directory, wheel_loaded, &error))
++        return 213;
++#endif
++      const auto dolphin_ini = [&] {
++        std::ifstream in(directory / "Config" / "Dolphin.ini");
++        return std::string((std::istreambuf_iterator<char>(in)), {});
++      };
++      if (!moderngekko::frontend::EnsureSteeringWheelPort(directory, true, &error) ||
++          !dolphin_ini().contains("SIDevice0 = 8\n") ||
++          !dolphin_ini().contains("EnableCheats"))
++        return 216;
++      if (!moderngekko::frontend::EnsureSteeringWheelPort(directory, true, &error))
++        return 217;
++      {
++        const std::string ini = dolphin_ini();
++        if (ini.find("SIDevice0") != ini.rfind("SIDevice0"))
++          return 217;
++      }
++      if (!moderngekko::frontend::EnsureSteeringWheelPort(directory, false, &error) ||
++          !dolphin_ini().contains("SIDevice0 = 6\n"))
++        return 218;
++      // A port 1 device the user chose themselves is not reset.
++      {
++        std::string ini = dolphin_ini();
++        ini.replace(ini.find("SIDevice0 = 6"), 13, "SIDevice0 = 12");
++        std::ofstream(directory / "Config" / "Dolphin.ini", std::ios::trunc) << ini;
++      }
++      if (!moderngekko::frontend::EnsureSteeringWheelPort(directory, false, &error) ||
++          !dolphin_ini().contains("SIDevice0 = 12\n"))
++        return 219;
 +    }
 +  }
 +
@@ -1002,7 +1099,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..535198f 100644
+index 03740d4..df69eab 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1625,7 +1722,7 @@ index 03740d4..535198f 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +688,33 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +688,47 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -1656,10 +1753,24 @@ index 03740d4..535198f 100644
 +          break;
 +        start = comma + 1;
 +      }
++    } else if (key == "steering_wheel" || key == "wheel_force_reverse") {
++      bool &setting = key == "steering_wheel" ? config.steering_wheel
++                                              : config.wheel_force_reverse;
++      if (!ParseBoolean(value, &setting))
++        return {.error = key + " must be true or false"};
++    } else if (key == "wheel_device")
++      config.wheel_device = raw_value;
++    else if (key == "wheel_steering" || key == "wheel_gas" ||
++             key == "wheel_brake") {
++      // An unreadable binding keeps the default instead of blocking launch.
++      if (ValidWheelAxis(raw_value))
++        (key == "wheel_steering" ? config.wheel_steering
++         : key == "wheel_gas"    ? config.wheel_gas
++                                 : config.wheel_brake) = raw_value;
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +760,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +774,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -1678,7 +1789,7 @@ index 03740d4..535198f 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +793,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +807,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -1706,7 +1817,7 @@ index 03740d4..535198f 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +839,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,14 +853,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -1747,7 +1858,24 @@ index 03740d4..535198f 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -271,6 +886,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -266,11 +895,25 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+     }
+     file << "controller" << i + 1 << '=' << config.controllers[i] << '\n';
+   }
++  if (config.wheel_device.find_first_of("\r\n") != std::string::npos) {
++    if (error)
++      *error = "wheel device cannot contain a newline";
++    return false;
++  }
++  file << "steering_wheel=" << (config.steering_wheel ? "true" : "false") << '\n'
++       << "wheel_device=" << config.wheel_device << '\n'
++       << "wheel_steering=" << config.wheel_steering << '\n'
++       << "wheel_gas=" << config.wheel_gas << '\n'
++       << "wheel_brake=" << config.wheel_brake << '\n'
++       << "wheel_force_reverse=" << (config.wheel_force_reverse ? "true" : "false")
++       << '\n';
+   file << "[Netplay]\n"
+        << "nickname=" << config.netplay_nickname << '\n'
         << "address=" << config.netplay_address << '\n'
         << "port=" << config.netplay_port << '\n'
         << "buffer=" << config.netplay_buffer << '\n';
@@ -1756,7 +1884,7 @@ index 03740d4..535198f 100644
    return true;
  }
  
-@@ -336,6 +953,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +979,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -1819,7 +1947,7 @@ index 03740d4..535198f 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +1045,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +1071,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -1894,7 +2022,143 @@ index 03740d4..535198f 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +1211,398 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -477,6 +1220,135 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+       user_directory, std::span<const std::string>(&value, 1), message);
+ }
+ 
++bool ValidWheelAxis(std::string_view value) {
++  // "Full Axis" spans the whole axis, for pedals that rest at one end.
++  if (value.starts_with("Full "))
++    value.remove_prefix(5);
++  constexpr std::string_view prefix = "Axis ";
++  if (!value.starts_with(prefix) || value.size() < prefix.size() + 2 ||
++      value.size() > prefix.size() + 3)
++    return false;
++  const std::string_view digits =
++      value.substr(prefix.size(), value.size() - prefix.size() - 1);
++  return std::ranges::all_of(digits, [](char c) { return c >= '0' && c <= '9'; }) &&
++         (value.back() == '+' || value.back() == '-');
++}
++
++bool GenerateWheelConfig(const fs::path &user_directory,
++                         const ConfigResult &config, std::string *message) {
++  const auto fail = [&](std::string text) {
++    if (message)
++      *message = std::move(text);
++    return false;
++  };
++#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
++  return fail("steering wheels need the GameCube controller build");
++#endif
++  if (config.wheel_device.empty() ||
++      config.wheel_device.find_first_of("\r\n") != std::string::npos)
++    return fail("select a connected steering wheel");
++  if (!ValidWheelAxis(config.wheel_steering) ||
++      config.wheel_steering.starts_with("Full ") ||
++      !ValidWheelAxis(config.wheel_gas) || !ValidWheelAxis(config.wheel_brake))
++    return fail("steering wheel axes must look like \"Axis 0+\"");
++  const fs::path destination = ControllerConfigPath(user_directory);
++  std::error_code ec;
++  fs::create_directories(destination.parent_path(), ec);
++  if (ec)
++    return fail("can't create controller config directory: " + ec.message());
++  std::ofstream output(destination, std::ios::trunc);
++  if (!output)
++    return fail("can't write " + destination.string());
++  // Dolphin's wheel device reads steering from the main stick X axis, the
++  // accelerator from main stick up and the brake from C-stick up, so both
++  // pedals can be held together. The wheel's force commands drive
++  // Rumble/Motor; a constant effect turns them into force feedback.
++  const std::string &steer = config.wheel_steering;
++  const std::string axis = steer.substr(0, steer.size() - 1);
++  const char right = steer.back(), left = right == '+' ? '-' : '+';
++  output << "[GCPad1]\n"
++         << "Device = " << config.wheel_device << '\n'
++         << "Main Stick/Left = `" << axis << left << "`\n"
++         << "Main Stick/Right = `" << axis << right << "`\n"
++         << "Main Stick/Up = `" << config.wheel_gas << "`\n"
++         << "Main Stick/Dead Zone = 0.00\n"
++         << "Main Stick/Calibration = 100.00\n"
++         << "C-Stick/Up = `" << config.wheel_brake << "`\n"
++         // Button numbers follow the common Logitech layout; other wheels
++         // can be rebound in GCPadNew.ini.
++         << "Buttons/A = `Button 0`\n"
++            "Buttons/B = `Button 1`\n"
++            "Buttons/X = `Button 2`\n"
++            "Buttons/Y = `Button 3`\n"
++            "Buttons/Z = `Button 6` | `Button 7`\n"
++            "Buttons/Start = `Button 9`\n"
++            "Triggers/L = `Button 5`\n"
++            "Triggers/R = `Button 4`\n"
++            "Triggers/L-Analog = `Button 5`\n"
++            "Triggers/R-Analog = `Button 4`\n"
++            "D-Pad/Up = `Hat 0 N`\n"
++            "D-Pad/Down = `Hat 0 S`\n"
++            "D-Pad/Left = `Hat 0 W`\n"
++            "D-Pad/Right = `Hat 0 E`\n"
++         << "Rumble/Motor = Constant\n"
++         // The same -100% range Dolphin's mapping UI uses to flip the pull.
++         << (config.wheel_force_reverse ? "Rumble/Motor/Range = -100.00\n" : "")
++         << "[GCPad2]\n[GCPad3]\n[GCPad4]\n";
++  if (!output)
++    return fail("can't write " + destination.string());
++  if (message)
++    *message = "steering wheel mapped to port 1 (experimental)";
++  return true;
++}
++
++bool EnsureSteeringWheelPort(const fs::path &user_directory, bool enabled,
++                             std::string *error) {
++  // Dolphin's SIDevices: 6 = standard controller, 8 = steering wheel.
++  constexpr std::string_view controller = "6", wheel = "8";
++  const fs::path path = user_directory / "Config" / "Dolphin.ini";
++  std::string content, line;
++  bool in_core = false, written = false;
++  const std::string wanted(enabled ? wheel : controller);
++  if (std::ifstream in(path); in) {
++    while (std::getline(in, line)) {
++      const std::string trimmed = Trim(line);
++      if (trimmed.starts_with('[') && trimmed.ends_with(']')) {
++        if (in_core && !written && enabled) {
++          content += "SIDevice0 = " + wanted + "\n";
++          written = true;
++        }
++        in_core = trimmed == "[Core]";
++      } else if (in_core) {
++        const auto equals = trimmed.find('=');
++        if (equals != std::string::npos &&
++            Trim(trimmed.substr(0, equals)) == "SIDevice0") {
++          if (!enabled && Trim(trimmed.substr(equals + 1)) != wheel)
++            return true;
++          line = "SIDevice0 = " + wanted;
++          written = true;
++        }
++      }
++      content += line + "\n";
++    }
++  }
++  if (!written) {
++    if (!enabled)
++      return true;
++    // Reached only when [Core] is missing or is the last section.
++    content += (in_core ? "" : "[Core]\n") + std::string("SIDevice0 = ") + wanted + "\n";
++  }
++  std::error_code ec;
++  fs::create_directories(path.parent_path(), ec);
++  std::ofstream out(path, std::ios::trunc);
++  out << content;
++  if (!out) {
++    if (error)
++      *error = "cannot write " + path.string();
++    return false;
++  }
++  return true;
++}
++
+ bool EnsureControllerConfig(const fs::path &user_directory,
+                             std::span<const std::string> controllers,
+                             std::string *message) {
+@@ -494,4 +1366,404 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -2093,18 +2357,24 @@ index 03740d4..535198f 100644
 +      "$Unlock AX Cup Tracks",
 +      "$All Vehicles Unlocked",
 +  };
++  // Builds before v0.9.2 wrote "$$Name"; Dolphin then keeps the second '$' in
++  // the code name and never matches it under [Gecko_Enabled]. Collapse any
++  // run of leading '$' so those lines are recognised and rewritten.
 +  auto format_gecko_header = [](std::string_view name) -> std::string {
-+    return name.starts_with('$') ? std::string(name) : ("$" + std::string(name));
++    const auto first = name.find_first_not_of('$');
++    return "$" + std::string(first == std::string_view::npos ? std::string_view{}
++                                                             : name.substr(first));
 +  };
-+  auto gecko_name_without_creator = [](std::string_view name) -> std::string {
-+    std::string s(name.starts_with('$') ? name.substr(1) : name);
++  auto gecko_name_without_creator = [&](std::string_view name) -> std::string {
++    std::string s = format_gecko_header(name).substr(1);
 +    const auto bracket = s.find('[');
 +    if (bracket != std::string::npos) {
 +      s = s.substr(0, bracket);
 +    }
 +    return "$" + Trim(s);
 +  };
-+  const auto is_managed = [&](const std::string &name) {
++  const auto is_managed = [&](const std::string &raw_name) {
++    const std::string name = format_gecko_header(raw_name);
 +    if (std::ranges::find(unlock_codes, name) != unlock_codes.end() ||
 +        std::ranges::find(legacy_codes, name) != legacy_codes.end()) {
 +      return true;
@@ -2294,7 +2564,7 @@ index 03740d4..535198f 100644
 +}
  } // namespace moderngekko::frontend
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..8582aad 100644
+index 3b18d05..06eed6c 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
 @@ -8,9 +8,22 @@
@@ -2320,7 +2590,7 @@ index 3b18d05..8582aad 100644
  };
  
  struct GraphicsBackendOption {
-@@ -18,14 +31,45 @@ struct GraphicsBackendOption {
+@@ -18,14 +31,53 @@ struct GraphicsBackendOption {
    const char *value;
  };
  
@@ -2360,6 +2630,14 @@ index 3b18d05..8582aad 100644
 +  bool custom_textures = false;
 +  bool graphics_mods = false;
 +  bool cheats = false;
++  // Experimental: port 1 becomes Dolphin's GameCube steering wheel while the
++  // selected controller is wheel_device. Bindings are Dolphin input names.
++  bool steering_wheel = false;
++  std::string wheel_device;
++  std::string wheel_steering = "Axis 0+";
++  std::string wheel_gas = "Axis 2-";
++  std::string wheel_brake = "Axis 3-";
++  bool wheel_force_reverse = false;
 +  // Local-only Gecko code IDs; automatically disabled during online NetPlay.
 +  std::vector<std::string> local_gecko_codes;
 +  // Empty preserves the existing Dolphin setting.
@@ -2367,7 +2645,7 @@ index 3b18d05..8582aad 100644
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -35,8 +79,15 @@ struct ConfigResult {
+@@ -35,8 +87,15 @@ struct ConfigResult {
    explicit operator bool() const { return error.empty(); }
  };
  
@@ -2383,7 +2661,7 @@ index 3b18d05..8582aad 100644
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                          bool create_if_missing);
  bool SaveConfig(const std::filesystem::path &user_directory,
-@@ -48,6 +99,8 @@ std::string
+@@ -48,6 +107,8 @@ std::string
  ReadConfiguredController(const std::filesystem::path &user_directory);
  std::vector<std::string>
  ReadConfiguredControllers(const std::filesystem::path &user_directory);
@@ -2392,10 +2670,20 @@ index 3b18d05..8582aad 100644
  bool ControllerConfigExists(const std::filesystem::path &user_directory);
  bool GenerateControllerConfig(const std::filesystem::path &user_directory,
                                std::span<const std::string> controllers,
-@@ -60,4 +113,13 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+@@ -60,4 +121,23 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                              std::string *message);
  bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                              std::string_view controller, std::string *message);
++// "Axis <n>+" or "Axis <n>-" (optionally "Full Axis ..."), the names Dolphin
++// gives raw SDL joystick axes. Steering must be a plain "Axis" name.
++bool ValidWheelAxis(std::string_view value);
++// Port 1 wheel profile from the wheel_* bindings in config; ports 2-4 empty.
++bool GenerateWheelConfig(const std::filesystem::path &user_directory,
++                         const ConfigResult &config, std::string *message);
++// Sets Dolphin's port 1 device to the steering wheel, or back to a standard
++// controller if it was a wheel. Other port 1 devices are left alone.
++bool EnsureSteeringWheelPort(const std::filesystem::path &user_directory,
++                             bool enabled, std::string *error);
 +bool EnsureCheatsConfigured(const std::filesystem::path &user_directory,
 +                            bool enabled, std::string *error);
 +bool EnsureCheatsConfigured(const std::filesystem::path &user_directory,
@@ -2991,7 +3279,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..ea30c83 100644
+index 7699c3d..5b350d1 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -3025,8 +3313,13 @@ index 7699c3d..ea30c83 100644
  #include <cstdio>
  #include <cstdlib>
  #include <filesystem>
-@@ -80,10 +89,32 @@ struct ControllerOption
+@@ -78,12 +87,37 @@ struct ControllerOption
+ {
+   std::string label;
    std::string device;
++  // Listed for the experimental steering wheel mode; gets a wheel profile.
++  bool wheel = false;
++  SDL_JoystickID joystick = 0;
  };
  
 +bool IsAllowedDiscId(std::string_view disc_id)
@@ -3059,10 +3352,11 @@ index 7699c3d..ea30c83 100644
      return "expected disc ID " MODERNGEKKO_REQUIRED_DISC_ID ", found " + metadata.disc_id;
  #endif
  #ifdef MODERNGEKKO_REQUIRED_DOL_SHA256
-@@ -101,6 +132,19 @@ std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
+@@ -101,7 +135,22 @@ std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
    return {};
  }
  
+-std::vector<ControllerOption> EnumerateControllers()
 +void ConfigureSteamGamepadHints()
 +{
 +  SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
@@ -3076,10 +3370,13 @@ index 7699c3d..ea30c83 100644
 +  }
 +}
 +
- std::vector<ControllerOption> EnumerateControllers()
++// Wheel mode also lists joysticks SDL can't map as gamepads: most wheels are
++// plain joysticks, and SDL only tags known models as wheels.
++std::vector<ControllerOption> EnumerateControllers(bool include_wheels)
  {
    std::vector<ControllerOption> result;
-@@ -111,9 +155,15 @@ std::vector<ControllerOption> EnumerateControllers()
+   std::unordered_map<std::string, int> device_ids;
+@@ -111,21 +160,53 @@ std::vector<ControllerOption> EnumerateControllers()
    {
      const SDL_JoystickID joystick_id = joystick_ids[i];
      const bool gamepad = SDL_IsGamepad(joystick_id);
@@ -3094,9 +3391,19 @@ index 7699c3d..ea30c83 100644
 +    if (pad)
 +      SDL_CloseGamepad(pad);
      const int device_id = device_ids[name]++;
-     if (!gamepad)
+-    if (!gamepad)
++    const bool wheel =
++        include_wheels &&
++        (!gamepad || SDL_GetJoystickTypeForID(joystick_id) == SDL_JOYSTICK_TYPE_WHEEL);
++    if (!gamepad && !wheel)
        continue;
-@@ -123,9 +173,28 @@ std::vector<ControllerOption> EnumerateControllers()
+     ControllerOption option;
+     option.label = device_id == 0 ? name : name + " (" + std::to_string(device_id + 1) + ")";
++    if (wheel)
++      option.label += " - steering wheel";
+     option.device = "SDL/" + std::to_string(device_id) + "/" + name;
++    option.wheel = wheel;
++    option.joystick = joystick_id;
      result.emplace_back(std::move(option));
    }
    SDL_free(joystick_ids);
@@ -3125,7 +3432,7 @@ index 7699c3d..ea30c83 100644
  int FindController(const std::vector<ControllerOption>& controllers, std::string_view device)
  {
    const auto found = std::ranges::find(controllers, device, &ControllerOption::device);
-@@ -153,9 +222,25 @@ fs::path DefaultUserDirectory()
+@@ -153,9 +234,25 @@ fs::path DefaultUserDirectory()
    return std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user";
  }
  
@@ -3151,7 +3458,7 @@ index 7699c3d..ea30c83 100644
    if (const char* user_profile = std::getenv("USERPROFILE"))
      return fs::path(user_profile) / "Documents";
  #endif
-@@ -164,6 +249,56 @@ fs::path DocumentsDirectory()
+@@ -164,6 +261,56 @@ fs::path DocumentsDirectory()
    return fs::current_path();
  }
  
@@ -3208,7 +3515,7 @@ index 7699c3d..ea30c83 100644
  fs::path ExecutableDirectory(const char* argv0)
  {
    std::error_code ec;
-@@ -204,6 +339,28 @@ bool ApplyBundledDolPatch(const fs::path& game_root, const fs::path& release_dir
+@@ -204,6 +351,28 @@ bool ApplyBundledDolPatch(const fs::path& game_root, const fs::path& release_dir
  #endif
  }
  
@@ -3237,7 +3544,7 @@ index 7699c3d..ea30c83 100644
  fs::path DefaultGameFile(const fs::path& user_directory, const fs::path& release_directory)
  {
  #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
-@@ -221,8 +378,34 @@ fs::path ReadDefaultGame(const fs::path& user_directory, const fs::path& release
+@@ -221,8 +390,34 @@ fs::path ReadDefaultGame(const fs::path& user_directory, const fs::path& release
    if (!value.empty() && value.back() == '\r')
      value.pop_back();
    fs::path game(value);
@@ -3273,7 +3580,7 @@ index 7699c3d..ea30c83 100644
    return game;
  }
  
-@@ -245,37 +428,43 @@ bool WriteDefaultGame(const fs::path& user_directory, const fs::path& release_di
+@@ -245,37 +440,43 @@ bool WriteDefaultGame(const fs::path& user_directory, const fs::path& release_di
    if (!ec && !relative.empty())
      stored = relative;
  #endif
@@ -3339,7 +3646,7 @@ index 7699c3d..ea30c83 100644
    return images;
  }
  
-@@ -291,7 +480,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -291,7 +492,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    const std::string source_id = source->GetGameID(source->GetGamePartition());
  #ifdef MODERNGEKKO_REQUIRED_DISC_ID
@@ -3348,7 +3655,7 @@ index 7699c3d..ea30c83 100644
      return image;
  #endif
  #if defined(MODERNGEKKO_DISC_PREPARER_FILENAME) && \
-@@ -337,7 +526,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -337,7 +538,11 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    return output;
  #else
@@ -3361,7 +3668,7 @@ index 7699c3d..ea30c83 100644
    return std::nullopt;
  #endif
  }
-@@ -375,16 +568,26 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -375,16 +580,26 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    if (disc_id.size() != 6)
      return fail("the selected image has an invalid disc ID");
  #ifdef MODERNGEKKO_REQUIRED_DISC_ID
@@ -3393,7 +3700,7 @@ index 7699c3d..ea30c83 100644
  #endif
    std::error_code ec;
    if (fs::is_directory(output, ec))
-@@ -397,19 +600,40 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -397,19 +612,40 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    const auto existing = moderngekko::InspectGame(output);
    if (existing && RequiredGameError(*existing.metadata).empty())
    {
@@ -3436,7 +3743,7 @@ index 7699c3d..ea30c83 100644
    if (ec)
      return fail("can't create extraction directory: " + ec.message());
  
-@@ -464,6 +688,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -464,6 +700,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
    fs::rename(staging, output, ec);
    if (ec)
      return fail("can't publish extracted game: " + ec.message());
@@ -3444,7 +3751,7 @@ index 7699c3d..ea30c83 100644
    std::string error;
    if (!WriteDefaultGame(user_directory, release_directory, output, &error))
      return fail(error);
-@@ -498,12 +723,135 @@ fs::path SiblingRunner(const char* argv0)
+@@ -498,12 +735,135 @@ fs::path SiblingRunner(const char* argv0)
    const fs::path sibling = self.parent_path() / runner;
    return fs::is_regular_file(sibling) ? sibling : runner;
  }
@@ -3581,7 +3888,7 @@ index 7699c3d..ea30c83 100644
    for (int i = 1; i < argc; ++i)
    {
      if (std::string_view(argv[i]) == "-X11" || std::string_view(argv[i]) == "--x11")
-@@ -512,9 +860,23 @@ int main(int argc, char** argv)
+@@ -512,9 +872,23 @@ int main(int argc, char** argv)
        use_wayland = true;
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
@@ -3606,7 +3913,7 @@ index 7699c3d..ea30c83 100644
    const fs::path release_directory = ExecutableDirectory(argv[0]);
    if (extract_only)
    {
-@@ -530,6 +892,12 @@ int main(int argc, char** argv)
+@@ -530,6 +904,12 @@ int main(int argc, char** argv)
      return success ? 0 : 1;
    }
  
@@ -3619,7 +3926,7 @@ index 7699c3d..ea30c83 100644
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
-@@ -542,12 +910,12 @@ int main(int argc, char** argv)
+@@ -542,12 +922,12 @@ int main(int argc, char** argv)
  #if defined(__linux__)
    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, use_wayland ? "wayland" : "x11");
  #endif
@@ -3634,7 +3941,7 @@ index 7699c3d..ea30c83 100644
                                          static_cast<int>(700 * scale),
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
-@@ -556,9 +924,20 @@ int main(int argc, char** argv)
+@@ -556,9 +936,20 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
@@ -3655,7 +3962,7 @@ index 7699c3d..ea30c83 100644
    if (!renderer)
    {
      SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
-@@ -571,17 +950,27 @@ int main(int argc, char** argv)
+@@ -571,17 +962,27 @@ int main(int argc, char** argv)
    IMGUI_CHECKVERSION();
    ImGui::CreateContext();
    ImGuiIO& io = ImGui::GetIO();
@@ -3685,7 +3992,7 @@ index 7699c3d..ea30c83 100644
    bool current_dol_changed = false;
    std::string current_dol_error;
    auto current_metadata =
-@@ -600,8 +989,18 @@ int main(int argc, char** argv)
+@@ -600,8 +1001,18 @@ int main(int argc, char** argv)
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
                  config.netplay_nickname.c_str());
@@ -3706,7 +4013,7 @@ index 7699c3d..ea30c83 100644
    int netplay_port = config.netplay_port;
    bool automatic_buffer = config.netplay_buffer == "auto";
    int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
-@@ -631,6 +1030,13 @@ int main(int argc, char** argv)
+@@ -631,28 +1042,58 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
@@ -3718,9 +4025,11 @@ index 7699c3d..ea30c83 100644
 +  std::string browser_error;
 +  bool browser_refresh = true;
    DialogState dialog;
-   std::vector<ControllerOption> controllers = EnumerateControllers();
+-  std::vector<ControllerOption> controllers = EnumerateControllers();
++  std::vector<ControllerOption> controllers = EnumerateControllers(config.steering_wheel);
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
-@@ -639,6 +1045,7 @@ int main(int argc, char** argv)
+   std::vector<std::string> configured_controllers =
+       moderngekko::frontend::ReadConfiguredControllers(user_directory);
    std::string selected_controller =
        configured_controllers.empty() ? config.controller : configured_controllers.front();
    int controller_index = FindController(controllers, selected_controller);
@@ -3728,7 +4037,120 @@ index 7699c3d..ea30c83 100644
    std::string controller_status;
    const auto select_controller = [&](int index)
    {
-@@ -681,23 +1088,43 @@ int main(int argc, char** argv)
++    const ControllerOption& option = controllers[index];
+     std::string message;
+-    if (!moderngekko::frontend::GenerateControllerConfig(user_directory, controllers[index].device,
+-                                                         &message))
++    if (option.wheel)
++      config.wheel_device = option.device;
++    const bool generated =
++        option.wheel ?
++            moderngekko::frontend::GenerateWheelConfig(user_directory, config, &message) :
++            moderngekko::frontend::GenerateControllerConfig(user_directory, option.device,
++                                                            &message);
++    if (!generated)
+     {
+       std::lock_guard lock(dialog.mutex);
+       dialog.error = std::move(message);
+       return false;
+     }
+     std::string error;
+-    if (!moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
+-                                           show_fps_in_title, controllers[index].device, &error))
++    bool saved = false;
++    if (option.wheel)
++    {
++      // The short SaveConfig reloads config.ini, which would drop wheel_device.
++      auto wheel_config = config;
++      wheel_config.controller = option.device;
++      wheel_config.controllers = {option.device};
++      wheel_config.resolution = resolutions[resolution_index].text;
++      wheel_config.show_fps_in_title = show_fps_in_title;
++      saved = moderngekko::frontend::SaveConfig(user_directory, wheel_config, &error);
++    }
++    else
++    {
++      saved = moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
++                                                show_fps_in_title, option.device, &error);
++    }
++    if (!saved)
+     {
+       std::lock_guard lock(dialog.mutex);
+       dialog.error = std::move(error);
+@@ -668,6 +1109,72 @@ int main(int argc, char** argv)
+     controller_status = std::move(message);
+     return true;
+   };
++  // Rewrites the wheel profile after a binding changes.
++  const auto apply_wheel = [&]
++  {
++    std::string error;
++    if (!moderngekko::frontend::GenerateWheelConfig(user_directory, config, &error) ||
++        !moderngekko::frontend::SaveConfig(user_directory, config, &error))
++    {
++      std::lock_guard lock(dialog.mutex);
++      dialog.error = std::move(error);
++      return;
++    }
++    controller_status = "Steering wheel bindings saved";
++  };
++  // Experimental wheel axis detection: the first axis that moves well away
++  // from where it rested when Detect was pressed becomes the binding.
++  struct WheelDetect
++  {
++    SDL_Joystick* joystick = nullptr;
++    std::string* binding = nullptr;
++    bool pedal = false;
++    const char* prompt = "";
++    std::vector<Sint16> rest;
++    Uint64 started = 0;
++  } wheel_detect;
++  const auto stop_wheel_detect = [&]
++  {
++    if (wheel_detect.joystick)
++      SDL_CloseJoystick(wheel_detect.joystick);
++    wheel_detect = {};
++  };
++  const auto poll_wheel_detect = [&]
++  {
++    SDL_Joystick* const joystick = wheel_detect.joystick;
++    const Uint64 elapsed = SDL_GetTicks() - wheel_detect.started;
++    const int axes = std::max(SDL_GetNumJoystickAxes(joystick), 0);
++    // Some backends report axes only after the first update, so the resting
++    // position is sampled a moment after opening.
++    if (wheel_detect.rest.empty())
++    {
++      if (elapsed < 250)
++        return;
++      for (int i = 0; i < axes; ++i)
++        wheel_detect.rest.push_back(SDL_GetJoystickAxis(joystick, i));
++      return;
++    }
++    for (int i = 0; i < axes && i < static_cast<int>(wheel_detect.rest.size()); ++i)
++    {
++      const int rest = wheel_detect.rest[i];
++      const int delta = SDL_GetJoystickAxis(joystick, i) - rest;
++      if (std::abs(delta) < 16000)
++        continue;
++      // A pedal resting at one end of its axis needs the full range, or
++      // half of its travel would read as released.
++      const bool full = wheel_detect.pedal && std::abs(rest) > 24000;
++      *wheel_detect.binding = std::string(full ? "Full " : "") + "Axis " + std::to_string(i) +
++                              (delta > 0 ? '+' : '-');
++      stop_wheel_detect();
++      apply_wheel();
++      return;
++    }
++    if (elapsed > 10000)
++    {
++      stop_wheel_detect();
++      controller_status = "No wheel or pedal movement detected";
++    }
++  };
+   const auto ensure_controller = [&]
+   {
+     if (moderngekko::frontend::ControllerConfigExists(user_directory))
+@@ -681,23 +1188,43 @@ int main(int argc, char** argv)
                         " has no configured controller device";
          return false;
        }
@@ -3763,7 +4185,8 @@ index 7699c3d..ea30c83 100644
    };
    const auto refresh_controllers = [&]
    {
-     controllers = EnumerateControllers();
+-    controllers = EnumerateControllers();
++    controllers = EnumerateControllers(config.steering_wheel);
      controller_index = FindController(controllers, selected_controller);
 +    // If startup initially fell back to Keyboard before SDL finished enumerating
 +    // a USB/Bluetooth/GameCube gamepad, switch to the newly detected gamepad.
@@ -3778,7 +4201,7 @@ index 7699c3d..ea30c83 100644
      if (!controller_profile_exists)
      {
        if (controller_index < 0 && !controllers.empty())
-@@ -710,6 +1137,11 @@ int main(int argc, char** argv)
+@@ -710,6 +1237,11 @@ int main(int argc, char** argv)
        else
          controller_status = "No SDL gamepad detected";
      }
@@ -3790,7 +4213,7 @@ index 7699c3d..ea30c83 100644
      else
      {
        controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
-@@ -774,14 +1206,18 @@ int main(int argc, char** argv)
+@@ -774,14 +1306,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -3812,7 +4235,7 @@ index 7699c3d..ea30c83 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1256,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1356,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -3822,7 +4245,7 @@ index 7699c3d..ea30c83 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1265,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1365,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -3885,7 +4308,7 @@ index 7699c3d..ea30c83 100644
      }
      else
      {
-@@ -891,6 +1272,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1372,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -3893,7 +4316,7 @@ index 7699c3d..ea30c83 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1322,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1422,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -3928,7 +4351,7 @@ index 7699c3d..ea30c83 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1381,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1481,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -3964,7 +4387,7 @@ index 7699c3d..ea30c83 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -993,18 +1422,17 @@ int main(int argc, char** argv)
+@@ -993,18 +1522,17 @@ int main(int argc, char** argv)
          const bool selected = controller_index == static_cast<int>(i);
          if (ImGui::Selectable(controllers[i].label.c_str(), selected))
          {
@@ -3987,7 +4410,7 @@ index 7699c3d..ea30c83 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,67 +1440,496 @@ int main(int argc, char** argv)
+@@ -1012,67 +1540,573 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -4005,7 +4428,12 @@ index 7699c3d..ea30c83 100644
 -      ImGui::SetNextItemWidth(180 * scale);
 -      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
 +    bool boost_on_x = config.boost_on_x;
-+    if (ImGui::Checkbox("Boost on X (swap X / Y)", &boost_on_x)) {
++    // The wheel profile binds numbered buttons, which the swap can't rewrite.
++    const bool wheel_selected = controller_index >= 0 && controllers[controller_index].wheel;
++    ImGui::BeginDisabled(wheel_selected);
++    const bool boost_clicked = ImGui::Checkbox("Boost on X (swap X / Y)", &boost_on_x);
++    ImGui::EndDisabled();
++    if (boost_clicked) {
 +      std::string error;
 +      if (moderngekko::frontend::SetBoostLayout(user_directory, boost_on_x, &error)) {
 +        const bool old_layout = config.boost_on_x;
@@ -4029,6 +4457,97 @@ index 7699c3d..ea30c83 100644
 -      ImGui::TextWrapped("%s", selected_image->string().c_str());
 -    else
 -      ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
+-
+-    if (!extraction.running)
++    bool steering_wheel = config.steering_wheel;
++    if (ImGui::Checkbox("Steering wheel (experimental)", &steering_wheel))
+     {
+-      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
++      stop_wheel_detect();
++      const auto previous = config;
++      config.steering_wheel = steering_wheel;
++      std::string error;
++      if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+       {
+-        static constexpr SDL_DialogFileFilter filters[] = {
+-            {"Disc images", "iso;wbfs;rvz"},
+-            {"ISO", "iso"},
+-            {"WBFS", "wbfs"},
+-            {"RVZ", "rvz"}};
+-        const std::string documents = DocumentsDirectory().string();
+-        SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
+-                               static_cast<int>(std::size(filters)), documents.c_str(), false);
++        refresh_controllers();
+       }
+-      if (selected_image)
++      else
++      {
++        config = previous;
++        std::lock_guard lock(dialog.mutex);
++        dialog.error = std::move(error);
++      }
++    }
++    ImGui::TextWrapped("Untested. Port 1 becomes Dolphin's GameCube steering wheel in offline play; "
++                       "online play keeps a normal controller. Choose your wheel in the list above, "
++                       "then detect its axes. Wheel drivers come from your system.");
++    if (config.steering_wheel && controller_index >= 0 && controllers[controller_index].wheel)
++    {
++      const auto wheel_row = [&](const char* label, std::string& binding, bool pedal,
++                                 const char* prompt)
+       {
++        ImGui::PushID(label);
++        ImGui::Text("%s: %s", label, binding.c_str());
+         ImGui::SameLine();
+-        if (ImGui::Button("Extract and Play"))
++        ImGui::BeginDisabled(wheel_detect.joystick != nullptr);
++        if (ImGui::SmallButton("Detect"))
+         {
+-          extraction.completed = 0;
+-          extraction.total = 1;
+-          extraction.running = true;
++          wheel_detect.joystick = SDL_OpenJoystick(controllers[controller_index].joystick);
++          if (wheel_detect.joystick)
++          {
++            wheel_detect.binding = &binding;
++            wheel_detect.pedal = pedal;
++            wheel_detect.prompt = prompt;
++            wheel_detect.started = SDL_GetTicks();
++          }
++          else
+           {
+-            std::lock_guard lock(extraction.mutex);
+-            extraction.error.clear();
+-            extraction.finished_game.reset();
++            controller_status = std::string("Can't open the wheel: ") + SDL_GetError();
++          }
++        }
++        ImGui::EndDisabled();
++        ImGui::PopID();
++      };
++      wheel_row("Steering", config.wheel_steering, false,
++                "Turn the wheel to the right...");
++      wheel_row("Gas pedal", config.wheel_gas, true, "Press the gas pedal all the way...");
++      wheel_row("Brake pedal", config.wheel_brake, true,
++                "Press the brake pedal all the way...");
++      if (wheel_detect.joystick)
++      {
++        ImGui::TextUnformatted(wheel_detect.rest.empty() ? "Keep the wheel still..." :
++                                                           wheel_detect.prompt);
++        poll_wheel_detect();
++      }
++      bool reverse_force = config.wheel_force_reverse;
++      if (ImGui::Checkbox("Reverse force feedback", &reverse_force))
++      {
++        config.wheel_force_reverse = reverse_force;
++        apply_wheel();
++      }
++      ImGui::TextDisabled("Buttons follow a common Logitech layout; edit GCPadNew.ini to change them.");
++    }
++    else if (wheel_detect.joystick)
++    {
++      stop_wheel_detect();
++    }
++    ImGui::Spacing();
 +    }
 +    const std::string game_id =
 +        current_metadata ? current_metadata.metadata->disc_id : std::string();
@@ -4174,12 +4693,19 @@ index 7699c3d..ea30c83 100644
 +              mod_browser_directory = path;
 +              mod_browser_refresh = true;
 +            }
-+          }
-+        }
+           }
+-          const fs::path image = *selected_image;
+-          extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
+-                                           {
+-                                             ExtractDisc(image, user_directory,
+-                                                         release_directory, &extraction);
+-                                           });
+         }
 +        ImGui::EndChild();
 +        ImGui::EndPopup();
-+      }
-+    }
+       }
+     }
+-    else
 +    ImGui::Spacing();
 +    }
 +    if (ImGui::CollapsingHeader("CHEATS & UNLOCKS")) {
@@ -4252,8 +4778,7 @@ index 7699c3d..ea30c83 100644
 +      ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Optional: entering the codes by hand");
 +      ImGui::TextWrapped("The newly discovered 2026 Gold Parts cheats (Thunderstorm, El Dorado, Chrono Symphony, Bahamut, Gladiator) are patched to work with a single controller (bypassing the 4-controller requirement).");
 +      ImGui::Spacing();
- 
--    if (!extraction.running)
++
 +      if (ImGui::TreeNode("View In-Game Button Cheats (F-Zero Shop)")) {
 +        ImGui::TextWrapped("Enter these button sequences in Customize > F-Zero Shop:");
 +        ImGui::Spacing();
@@ -4368,33 +4893,25 @@ index 7699c3d..ea30c83 100644
 +        ImGui::CollapsingHeader("GAME FILES & DISC IMAGE");
 +    if (show_disc_section)
      {
--      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
+-      const float progress =
+-          std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
+-      ImGui::ProgressBar(progress, ImVec2(-1, 0));
 +      if (current_metadata)
-       {
--        static constexpr SDL_DialogFileFilter filters[] = {
--            {"Disc images", "iso;wbfs;rvz"},
--            {"ISO", "iso"},
--            {"WBFS", "wbfs"},
--            {"RVZ", "rvz"}};
--        const std::string documents = DocumentsDirectory().string();
--        SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
--                               static_cast<int>(std::size(filters)), documents.c_str(), false);
++      {
 +        ImGui::TextUnformatted("Extracted game folder");
 +        ImGui::TextWrapped("%s", SafePathString(current_game).c_str());
 +        HintText("The game is already extracted and ready to play. Only select an ISO or RVZ "
 +                 "below if you want to re-extract.");
 +        ImGui::Spacing();
-       }
++      }
 +      ImGui::TextUnformatted("Game disc image");
-       if (selected_image)
++      if (selected_image)
 +        ImGui::TextWrapped("%s", SafePathString(*selected_image).c_str());
 +      else
 +        ImGui::TextDisabled("No ISO or RVZ selected");
 +
 +      if (!extraction.running)
-       {
--        ImGui::SameLine();
--        if (ImGui::Button("Extract and Play"))
++      {
 +        if (ImGui::Button("Browse for ISO / RVZ")) {
 +          browser_refresh = true;
 +          ImGui::OpenPopup("Choose game image");
@@ -4475,16 +4992,10 @@ index 7699c3d..ea30c83 100644
 +          ImGui::EndPopup();
 +        }
 +        if (selected_image)
-         {
--          extraction.completed = 0;
--          extraction.total = 1;
--          extraction.running = true;
++        {
 +          ImGui::SameLine();
 +          if (ImGui::Button("Extract and Play"))
-           {
--            std::lock_guard lock(extraction.mutex);
--            extraction.error.clear();
--            extraction.finished_game.reset();
++          {
 +            extraction.completed = 0;
 +            extraction.total = 1;
 +            extraction.running = true;
@@ -4508,21 +5019,9 @@ index 7699c3d..ea30c83 100644
 +                                                 extraction.running = false;
 +                                               }
 +                                             });
-           }
--          const fs::path image = *selected_image;
--          extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
--                                           {
--                                             ExtractDisc(image, user_directory,
--                                                         release_directory, &extraction);
--                                           });
-         }
-       }
--    }
--    else
--    {
--      const float progress =
--          std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
--      ImGui::ProgressBar(progress, ImVec2(-1, 0));
++          }
++        }
++      }
 +      else
 +      {
 +        const float progress =
@@ -4532,7 +5031,7 @@ index 7699c3d..ea30c83 100644
      }
  
      {
-@@ -1090,16 +1947,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +2124,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -4604,7 +5103,7 @@ index 7699c3d..ea30c83 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +2030,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +2207,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -4615,7 +5114,7 @@ index 7699c3d..ea30c83 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1165,6 +2081,13 @@ int main(int argc, char** argv)
+@@ -1165,6 +2258,13 @@ int main(int argc, char** argv)
        std::filesystem::create_directories(log_path.parent_path(), log_error);
        SDL_IOStream* log_stream =
            log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
@@ -4629,7 +5128,7 @@ index 7699c3d..ea30c83 100644
        SDL_Process* process = nullptr;
        std::string process_error;
        if (log_stream)
-@@ -1201,9 +2124,35 @@ int main(int argc, char** argv)
+@@ -1201,9 +2301,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -4667,7 +5166,7 @@ index 7699c3d..ea30c83 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +2188,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2365,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -4690,7 +5189,7 @@ index 7699c3d..ea30c83 100644
            }
            else
            {
-@@ -1266,8 +2218,24 @@ int main(int argc, char** argv)
+@@ -1266,8 +2395,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
@@ -4716,7 +5215,7 @@ index 7699c3d..ea30c83 100644
 +  }
 +}
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..0fcd9c2 100644
+index d6b3569..50bc03e 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -6,6 +6,7 @@
@@ -4807,7 +5306,26 @@ index d6b3569..0fcd9c2 100644
    if (config.graphics.backend.empty())
      config.graphics.backend = frontend_config.graphics_backend;
    config.fullscreen = frontend_config.fullscreen;
-@@ -286,7 +329,22 @@ int RunMain(int argc, char **argv) {
+@@ -265,6 +308,18 @@ int RunMain(int argc, char **argv) {
+     }
+     std::cout << "controller configuration: " << controller_message << '\n';
+   }
++  // Experimental wheel mode is offline-only: NetPlay always gets a standard
++  // controller on port 1.
++  const bool steering_wheel =
++      !netplay_role && frontend_config.steering_wheel &&
++      !frontend_config.wheel_device.empty() &&
++      frontend_config.controller == frontend_config.wheel_device;
++  std::string wheel_error;
++  if (!moderngekko::frontend::EnsureSteeringWheelPort(
++          config.user_directory, steering_wheel, &wheel_error))
++    std::cerr << "steering wheel: " << wheel_error << '\n';
++  else if (steering_wheel)
++    std::cout << "steering wheel: port 1 uses Dolphin's GameCube wheel (experimental)\n";
+ 
+ #ifdef MODERNGEKKO_DOL_PATCH_MANIFEST
+   bool dol_changed = false;
+@@ -286,7 +341,22 @@ int RunMain(int argc, char **argv) {
    }
  
  #ifdef MODERNGEKKO_REQUIRED_DISC_ID
@@ -4831,7 +5349,7 @@ index d6b3569..0fcd9c2 100644
      std::cerr << "unsupported disc ID: expected "
                << MODERNGEKKO_REQUIRED_DISC_ID << ", got "
                << inspected.metadata->disc_id << '\n';
-@@ -335,9 +393,41 @@ int RunMain(int argc, char **argv) {
+@@ -335,9 +405,41 @@ int RunMain(int argc, char **argv) {
  
  #if defined(__linux__) || defined(_WIN32)
    if (!config.headless && config.graphics.backend.empty())
