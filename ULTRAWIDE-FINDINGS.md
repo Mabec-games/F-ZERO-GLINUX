@@ -165,3 +165,14 @@ untested idea, not a result.
 3. Compare plain `CustomStretch` against Dolphin's widescreen hack with
    `CustomStretch` (not needed for PAL any more; the code gives the correct
    result with the hack off).
+
+## Update 2026-10-30: NTSC-U slot filled (untested)
+
+The `ultrawide_21_9_pal` entry (now titled "21:9 Ultrawide 3D & HUD [GLINUX]";
+the id is unchanged so saved selections still apply) has a GFZE01 body made
+from the value words of the sourced US code: `141607E0 3F100000`,
+`14161E98 3F100000` and `14164108 40155555`, inside the usual `po` guard. The
+ASCII "21:9" label write (`303EA9E8`/`143EA9E0`/`143EA9E4`) is left out. This
+is untested on a running GFZE01 game; it can be checked on a 16:9 monitor (the
+21:9 picture is letterboxed) by comparing a race with and without the code. If
+it does not hold, find the GFZE01 words the same way as for PAL.
