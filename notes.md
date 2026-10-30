@@ -3,7 +3,7 @@
 Updated: 2026-10-30.
 
 
-## Latest update — Release 0.9.3: 21:9 Ultrawide Aspect Ratio, Presets & Automated Camera Patch, 2026-10-30
+## Latest update — Release 0.9.3: 21:9 Ultrawide Aspect Ratio & Presets (no camera widening), 2026-10-30
 
 1. **21:9 Ultrawide Display Support**:
    - **Aspect Ratio Dropdown**: Added `21:9 (ultrawide)` to the launcher's display aspect ratio selector (`moderngekko_launcher.cpp`) and configuration parser (`frontend_config.cpp`).
@@ -11,15 +11,14 @@ Updated: 2026-10-30.
      - `1080p Ultrawide` (2560 × 1080, 3× EFB scale)
      - `1440p Ultrawide` (3440 × 1440, 4× EFB scale)
      - `4K / 5K2K Ultrawide` (5120 × 2160, 6× EFB scale)
-   - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::Stretch` and custom aspect ratio dimensions 21:9 when `aspect_ratio=21:9`, completely filling ultrawide displays in fullscreen and ultrawide windows without horizontal pillarboxing or letterboxing.
+   - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::CustomStretch` (exact 21:9, letterboxed in other windows; plain `Stretch` ignores the custom ratio and uses the window's) when `aspect_ratio=21:9`. The picture is the game's 16:9 image stretched to 21:9; not tested against a running game.
 
-2. **21:9 Projection & Camera FOV Patch**:
-   - Added gamemasterplc's 21:9 Gecko camera projection code for both NTSC-U (`GFZE01`) and PAL (`GFZP01`) into `SupportedLocalGeckoCodes()` (`ultrawide_21_9`).
-   - Selecting `21:9 (ultrawide)` in the launcher automatically enables the camera FOV code in `local_gecko_codes` and `EnsureCheatsConfigured`, ensuring correct 3D geometry and no distorted stretching out-of-the-box.
-   - Cleanly stripped in NetPlay lobbies to preserve deterministic online race sync.
+2. **No 21:9 camera code (review 2026-10-30)**:
+   - The first version shipped a Gecko code "21:9 Ultrawide Camera FOV [gamemasterplc]". It had no source (no search hit), identical addresses for GFZE01 and GFZP01 (every real code here differs per region) and wrote the ASCII text "21:9" into memory. Removed, together with the automatic enabling in launcher and `EnsureCheatsConfigured`.
+   - Open: a real widened-camera code needs its own reverse engineering of the projection setup.
 
 3. **Validation & Unit Testing**:
-   - Updated `tests/frontend_config_test.cpp` verifying 21:9 saving/loading, 9 resolution presets, and automated ultrawide Gecko code generation in `GameSettings` for both US and PAL builds. All tests passing.
+   - Updated `tests/frontend_config_test.cpp` verifying 21:9 saving/loading and the 9 resolution presets. Not run: the game itself (no ISO here) and a full AppImage build.
 
 
 ## Previous update — Release 0.9.2: PAL (GFZP01) Support, Local Gecko Cheats & Beta Hotfixes Rollup, 2026-10-29
