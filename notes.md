@@ -1,9 +1,31 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-10-29.
+Updated: 2026-10-30.
 
 
-## Latest update — Release 0.9.2: PAL (GFZP01) Support, Local Gecko Cheats & Beta Hotfixes Rollup, 2026-10-29
+## Latest update — Release 0.9.3: 21:9 Ultrawide Aspect Ratio & Presets (no camera widening), 2026-10-30
+
+1. **21:9 Ultrawide Display Support**:
+   - **Aspect Ratio Dropdown**: Added `21:9 (ultrawide)` to the launcher's display aspect ratio selector (`moderngekko_launcher.cpp`) and configuration parser (`frontend_config.cpp`).
+   - **Resolution Presets**: Added three new ultrawide presets to `SupportedResolutions()`:
+     - `1080p Ultrawide` (2560 × 1080, 3× EFB scale)
+     - `1440p Ultrawide` (3440 × 1440, 4× EFB scale)
+     - `4K / 5K2K Ultrawide` (5120 × 2160, 6× EFB scale)
+   - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::CustomStretch` (exact 21:9, letterboxed in other windows; plain `Stretch` ignores the custom ratio and uses the window's) when `aspect_ratio=21:9`. The picture is the game's 16:9 image stretched to 21:9; not tested against a running game.
+
+2. **No 21:9 camera code in the table (reviewed and researched 2026-10-30)**:
+   - The first version shipped a Gecko code "21:9 Ultrawide Camera FOV [gamemasterplc]" with identical addresses for GFZE01 and GFZP01 (every real code here differs per region). Removed, together with the automatic enabling in launcher and `EnsureCheatsConfigured`.
+   - Correction to the first review: the code was **not invented**. Its 12 lines match the "21:9" entry on gamemasterplc's GFZE01 page and Almar's Guides (US) character for character; a 32:9 sibling exists on the Dolphin forum. It is a **GFZE01-only** code (the `ASCII "21:9"` write is a menu label, the three floats are a stored aspect plus two scale factors). It was never tested in this project, and no GFZP01 equivalent was found.
+   - Full write-up, URLs, what was checked and the open steps: `ULTRAWIDE-FINDINGS.md`.
+   - **PAL code verified in-game (2026-10-30):** built the runtime, booted the GFZP01 RVZ headless-controlled, and found the two PAL words by reading the main module (`[0x800030C8]` = 0x801BEF00 in that boot): `po+0x165040` (the 16/9 aspect float the game's aspect getter returns; 4/3 sits at +0x165044) and `po+0x162D60` (0.75, the HUD X scale used when the game's Screen Mode is Wide). Writing 21/9 (`40155555`) and 0.5625 (`3F100000`) there gives a correctly proportioned 21:9 3D view and HUD; each word alone fixes only its half (3D vs HUD). New code `ultrawide_21_9_pal` (GFZP01 only; GFZE01 slot empty) in `SupportedLocalGeckoCodes()`, tested through the real Gecko path (Time Attack, Mute City) and by `tests/frontend_config_test.cpp` (code 130).
+   - The aspect word is read when the race camera is created, not every frame; the code is applied at boot, so this only matters for live memory writes during a race.
+   - Not tested: split screen, other courses, culling at the screen edges, NetPlay (local Gecko codes are stripped online anyway).
+
+3. **Validation & Unit Testing**:
+   - Updated `tests/frontend_config_test.cpp` verifying 21:9 saving/loading and the 9 resolution presets. Not run: the game itself (no ISO here) and a full AppImage build.
+
+
+## Previous update — Release 0.9.2: PAL (GFZP01) Support, Local Gecko Cheats & Beta Hotfixes Rollup, 2026-10-29
 
 1. **PAL (`GFZP01`) Support**:
    - **Dual Disc ID Validation**: Configured `-DMODERNGEKKO_REQUIRED_DISC_ID="GFZE01,GFZP01"` across `build-glinux.sh`, `build-windows.ps1`, `package-windows.ps1`, and `audit-appdir.py`. Both `moderngekko_launcher.cpp` and `moderngekko_run.cpp` parse comma-separated disc ID lists and accept either `GFZE01` or `GFZP01`.

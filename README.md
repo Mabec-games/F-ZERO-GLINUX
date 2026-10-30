@@ -27,10 +27,10 @@ disc contents and personal memory-card saves are not included in the packages.
 
 - **USA (`GFZE01`) & PAL (`GFZP01`) support:** import either region's ISO or RVZ; PAL boots with 60Hz (`EuRGB60`) enabled for full 60 FPS gameplay.
 - **Controller-friendly launcher** with racing artwork, gamepad navigation and clear loading feedback.
-- **Six resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1440p and 4K.
+- **Nine resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K and 4K Ultrawide (5120×2160).
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
 - **Boost on X:** optional X/Y swap for modern four-button gamepads.
-- **Native widescreen:** use GX's own Screen Mode setting, saved on your memory card.
+- **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. On PAL (`GFZP01`) the experimental local code "21:9 Ultrawide 3D & HUD (PAL only)" widens the 3D view and fixes the stretched HUD (tested in-game); on NTSC-U (`GFZE01`) the picture is still the 16:9 image stretched sideways.
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
@@ -191,7 +191,7 @@ minutes on slower GPUs; later starts are fast.
 1. Select **Browse for ISO / RVZ** and import your USA (`GFZE01`) or PAL (`GFZP01`) game image. For Flatpak, use Downloads. PAL versions automatically run with 60Hz mode enabled.
 2. Open **Controller**, choose your gamepad and optionally enable **Boost on X**.
 3. Choose your graphics settings, then press **PLAY**. The loading screen stays visible while the game starts.
-4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 display setting in the launcher.
+4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 or 21:9 display setting in the launcher.
 
 To exit a race, press **Escape**, then use the D-pad and A/B on the confirmation
 window. Offline play pauses while the prompt is open; an online session keeps
@@ -259,7 +259,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Game versions | NTSC-U (`GFZE01`) and PAL (`GFZP01`) supported (PAL runs at 60Hz) |
 | JIT gameplay | Playable; smooth 60 FPS reported on that machine |
 | Static recompilation | Experimental; performance work remains |
-| Native widescreen | In-game setting; remembered in the player's save |
+| Native widescreen / 21:9 | 16:9 in-game setting. 21:9: PAL has a tested widened-camera code (experimental); NTSC-U only stretches the 16:9 picture (a sourced code is untested; see `ULTRAWIDE-FINDINGS.md`) |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
