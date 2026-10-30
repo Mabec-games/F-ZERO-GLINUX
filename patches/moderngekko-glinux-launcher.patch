@@ -163,7 +163,7 @@ index 0adc855..404ec79 100644
    // Boot straight into a savestate instead of from the title screen.
    std::optional<std::filesystem::path> load_state_path;
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..124ead4 100644
+index f9b5405..a769280 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -6,6 +6,7 @@
@@ -294,15 +294,22 @@ index f9b5405..124ead4 100644
    if (!impl->config.graphics.backend.empty())
      Config::SetBase(Config::MAIN_GFX_BACKEND, impl->config.graphics.backend);
    else if (impl->config.headless)
-@@ -665,6 +707,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -665,6 +707,31 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    if (impl->config.graphics.internal_resolution_scale)
      Config::SetBase(Config::GFX_EFB_SCALE,
                      *impl->config.graphics.internal_resolution_scale);
 +  if (!impl->config.graphics.aspect_ratio.empty()) {
-+    Config::SetBase(Config::GFX_ASPECT_RATIO,
-+                    impl->config.graphics.aspect_ratio == "16:9"
-+                        ? AspectMode::ForceWide : AspectMode::ForceStandard);
-+    Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
++    if (impl->config.graphics.aspect_ratio == "21:9") {
++      Config::SetBase(Config::GFX_ASPECT_RATIO, AspectMode::Stretch);
++      Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_WIDTH, 21);
++      Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_HEIGHT, 9);
++      Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
++    } else {
++      Config::SetBase(Config::GFX_ASPECT_RATIO,
++                      impl->config.graphics.aspect_ratio == "16:9"
++                          ? AspectMode::ForceWide : AspectMode::ForceStandard);
++      Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
++    }
 +  }
 +  Config::SetBase(Config::GFX_VSYNC, impl->config.graphics.vsync);
 +  Config::SetBase(Config::GFX_HIRES_TEXTURES, impl->config.graphics.custom_textures);
@@ -319,7 +326,7 @@ index f9b5405..124ead4 100644
    Config::SetBase(Config::GFX_SHADER_CACHE, true);
    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                    ShaderCompilationMode::AsynchronousUberShaders);
-@@ -782,6 +842,8 @@ RuntimeRunResult Runtime::Run() {
+@@ -782,6 +849,8 @@ RuntimeRunResult Runtime::Run() {
          if (state == Core::State::Uninitialized && m_impl->platform)
            m_impl->platform->Stop();
        });
@@ -328,7 +335,7 @@ index f9b5405..124ead4 100644
    if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot),
                               m_impl->platform->GetWindowSystemInfo())) {
      m_impl->running = false;
-@@ -792,6 +854,12 @@ RuntimeRunResult Runtime::Run() {
+@@ -792,6 +861,12 @@ RuntimeRunResult Runtime::Run() {
    m_impl->booted = true;
    m_impl->present_hook =
        GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
@@ -515,7 +522,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..dfdd84e 100644
+index 6bb9e0e..553bc55 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -582,7 +589,7 @@ index 6bb9e0e..dfdd84e 100644
    const std::string controller = "SDL/0/Test Controller";
    if (!moderngekko::frontend::SaveConfig(directory, "1920x1080", false,
                                           controller, &error))
-@@ -29,10 +77,59 @@ int main() {
+@@ -29,10 +77,63 @@ int main() {
    const auto loaded = moderngekko::frontend::LoadConfig(directory, false);
    if (!loaded || loaded.dolphin_scale != 3 || loaded.show_fps_in_title ||
        loaded.controller != controller ||
@@ -599,16 +606,20 @@ index 6bb9e0e..dfdd84e 100644
 +      !moderngekko::frontend::SaveConfig(directory, "1280x720", true, controller, &error) ||
 +      moderngekko::frontend::LoadConfig(directory, false).aspect_ratio != "16:9")
 +    return 31; // Resolution/controller updates preserve display choice.
++  wide.aspect_ratio = "21:9";
++  if (!moderngekko::frontend::SaveConfig(directory, wide, &error) ||
++      moderngekko::frontend::LoadConfig(directory, false).aspect_ratio != "21:9")
++    return 32;
 +  wide.aspect_ratio = "4:3";
 +  if (!moderngekko::frontend::SaveConfig(directory, wide, &error) ||
 +      moderngekko::frontend::LoadConfig(directory, false).aspect_ratio != "4:3")
-+    return 32;
++    return 33;
 +  wide.aspect_ratio = "invalid";
 +  if (moderngekko::frontend::SaveConfig(directory, wide, &error))
-+    return 33;
++    return 34;
 +  // New presets separate physical window size from EFB scale.
 +  const auto &presets = moderngekko::frontend::SupportedResolutions();
-+  if (presets.size() != 6 || std::string(presets[1].text) != "1280x800") return 50;
++  if (presets.size() != 9 || std::string(presets[1].text) != "1280x800") return 50;
 +  auto graphics = loaded;
 +  graphics.resolution = "1280x800";
 +  graphics.vsync = true;
@@ -643,7 +654,7 @@ index 6bb9e0e..dfdd84e 100644
    moderngekko::frontend::ConfigResult netplay_config = loaded;
    netplay_config.graphics_backend = "OpenGL";
    netplay_config.fullscreen = true;
-@@ -89,7 +186,7 @@ int main() {
+@@ -89,7 +190,7 @@ int main() {
    }
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
    if (!generated.contains("Buttons/A = `Button A`\n") ||
@@ -652,7 +663,7 @@ index 6bb9e0e..dfdd84e 100644
        !generated.contains("Main Stick/Up = `Left Y+`\n") ||
        !generated.contains("C-Stick/Up = `Right Y+`\n") ||
        !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
-@@ -114,6 +211,31 @@ int main() {
+@@ -114,6 +215,31 @@ int main() {
  #endif
  
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
@@ -684,7 +695,7 @@ index 6bb9e0e..dfdd84e 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +260,260 @@ int main() {
+@@ -138,6 +264,262 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -750,10 +761,10 @@ index 6bb9e0e..dfdd84e 100644
 +    if (defs != 2) return 88;  // one definition plus one enable entry
 +  }
 +  {
-+    if (moderngekko::frontend::SupportedLocalGeckoCodes().size() < 15)
++    if (moderngekko::frontend::SupportedLocalGeckoCodes().size() < 16)
 +      return 110;
 +    cheats_cfg.cheats = false;
-+    cheats_cfg.local_gecko_codes = {"boost_from_lap_1", "track_restore"};
++    cheats_cfg.local_gecko_codes = {"boost_from_lap_1", "track_restore", "ultrawide_21_9"};
 +    if (!moderngekko::frontend::SaveConfig(directory, cheats_cfg, &error))
 +      return 111;
 +    const auto reloaded_gecko =
@@ -772,14 +783,16 @@ index 6bb9e0e..dfdd84e 100644
 +    const std::string local_enabled = enabled_codes();
 +    if (local_enabled.contains("$Max Tickets (99,999)") ||
 +        !local_enabled.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]") ||
-+        !local_enabled.contains("$Track Recovery on Fall-Off (All Modes) [Ralf]"))
++        !local_enabled.contains("$Track Recovery on Fall-Off (All Modes) [Ralf]") ||
++        !local_enabled.contains("$21:9 Ultrawide Camera FOV [gamemasterplc]"))
 +      return 114;
 +    // Verify PAL GFZP01.ini is also generated with PAL offsets and local codes.
 +    {
 +      std::ifstream in_pal(directory / "GameSettings" / "GFZP01.ini");
 +      std::string gfz_pal_ini((std::istreambuf_iterator<char>(in_pal)), {});
 +      if (!gfz_pal_ini.contains("142486E0 0001869F") ||
-+          !gfz_pal_ini.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]"))
++          !gfz_pal_ini.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]") ||
++          !gfz_pal_ini.contains("$21:9 Ultrawide Camera FOV [gamemasterplc]"))
 +        return 115;
 +    }
 +    // Online (NetPlay) mode must strip local Gecko codes while keeping unlocks
@@ -1002,7 +1015,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..535198f 100644
+index 03740d4..c6f95d6 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1040,7 +1053,7 @@ index 03740d4..535198f 100644
    return {};
  }
  
-@@ -73,24 +72,550 @@ std::string_view ControllerSectionPrefix() {
+@@ -73,24 +72,584 @@ std::string_view ControllerSectionPrefix() {
  
  } // namespace
  
@@ -1113,8 +1126,11 @@ index 03740d4..535198f 100644
 +      {"1280x800", 2, "800p - Steam Deck (1280 x 800)", 1280, 800},
 +      {"1280x720", 2, "720p", 1280, 720},
 +      {"1920x1080", 3, "1080p", 1920, 1080},
++      {"2560x1080", 3, "1080p Ultrawide (2560 x 1080)", 2560, 1080},
 +      {"2560x1440", 4, "1440p", 2560, 1440},
++      {"3440x1440", 4, "1440p Ultrawide (3440 x 1440)", 3440, 1440},
 +      {"3840x2160", 6, "4K", 3840, 2160},
++      {"5120x2160", 6, "4K / 5K2K Ultrawide (5120 x 2160)", 5120, 2160},
    };
    return resolutions;
  }
@@ -1588,6 +1604,37 @@ index 03740d4..535198f 100644
 +          "E0000000 80008000\n",
 +          "",
 +      },
++      {
++          "ultrawide_21_9",
++          "Camera, HUD & Audio Tweaks",
++          "21:9 Ultrawide Camera FOV [gamemasterplc]",
++          "Adjusts the 3D projection matrix and camera FOV for 21:9 ultrawide displays. Recommended with 21:9 Aspect Ratio and an Ultrawide resolution preset.",
++          "$21:9 Ultrawide Camera FOV [gamemasterplc]",
++          "48000000 800030C8\n"
++          "DE000000 80008180\n"
++          "303EA9E8 65656E00\n"
++          "143EA9E0 32313A39\n"
++          "143EA9E4 00000000\n"
++          "E0000000 80008000\n"
++          "48000000 800030C8\n"
++          "DE000000 80008180\n"
++          "141607E0 3F100000\n"
++          "14161E98 3F100000\n"
++          "14164108 40155555\n"
++          "E0000000 80008000\n",
++          "48000000 800030C8\n"
++          "DE000000 80008180\n"
++          "303EA9E8 65656E00\n"
++          "143EA9E0 32313A39\n"
++          "143EA9E4 00000000\n"
++          "E0000000 80008000\n"
++          "48000000 800030C8\n"
++          "DE000000 80008180\n"
++          "141607E0 3F100000\n"
++          "14161E98 3F100000\n"
++          "14164108 40155555\n"
++          "E0000000 80008000\n",
++      },
 +  };
 +  return codes;
 +}
@@ -1595,7 +1642,7 @@ index 03740d4..535198f 100644
  ConfigResult LoadConfig(const fs::path &user_directory,
                          bool create_if_missing) {
    const fs::path path = user_directory / "config.ini";
-@@ -126,6 +651,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -126,6 +685,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
        if (config.graphics_backend.empty())
          return {.error = "graphics backend must be Vulkan or OpenGL"};
      }
@@ -1618,14 +1665,14 @@ index 03740d4..535198f 100644
 +      else return {.error = "anisotropy must be 1, 2, 4, 8 or 16"};
 +    }
 +    else if (key == "aspect_ratio") {
-+      if (value != "preserve" && value != "16:9" && value != "4:3")
-+        return {.error = "aspect_ratio must be preserve, 16:9 or 4:3"};
++      if (value != "preserve" && value != "16:9" && value != "21:9" && value != "4:3")
++        return {.error = "aspect_ratio must be preserve, 16:9, 21:9 or 4:3"};
 +      config.aspect_ratio = value == "preserve" ? "" : value;
 +    }
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +688,33 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +722,33 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -1659,7 +1706,7 @@ index 03740d4..535198f 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +760,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +794,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -1678,7 +1725,7 @@ index 03740d4..535198f 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +793,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +827,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -1686,7 +1733,7 @@ index 03740d4..535198f 100644
 +  if ((config.anti_aliasing != "off" && config.anti_aliasing != "fxaa" && config.anti_aliasing != "msaa4") ||
 +      (config.anisotropy != 1 && config.anisotropy != 2 && config.anisotropy != 4 && config.anisotropy != 8 && config.anisotropy != 16) ||
 +      (!config.aspect_ratio.empty() && config.aspect_ratio != "16:9" &&
-+       config.aspect_ratio != "4:3") ||
++       config.aspect_ratio != "21:9" && config.aspect_ratio != "4:3") ||
 +      config.resolution.empty() || graphics_backend.empty() ||
        config.netplay_nickname.empty() ||
        config.netplay_nickname.size() > 30 ||
@@ -1706,7 +1753,7 @@ index 03740d4..535198f 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +839,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,14 +873,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -1747,7 +1794,7 @@ index 03740d4..535198f 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -271,6 +886,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -271,6 +920,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
         << "address=" << config.netplay_address << '\n'
         << "port=" << config.netplay_port << '\n'
         << "buffer=" << config.netplay_buffer << '\n';
@@ -1756,7 +1803,7 @@ index 03740d4..535198f 100644
    return true;
  }
  
-@@ -336,6 +953,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +987,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -1819,7 +1866,7 @@ index 03740d4..535198f 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +1045,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +1079,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -1894,7 +1941,7 @@ index 03740d4..535198f 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +1211,398 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1245,409 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -1914,10 +1961,21 @@ index 03740d4..535198f 100644
 +  const auto &supported_local = SupportedLocalGeckoCodes();
 +  std::vector<const LocalGeckoCodeOption *> active_local_options;
 +  if (allow_local_gecko_codes) {
++    const ConfigResult current_config = LoadConfig(user_directory, false);
 +    for (const std::string &raw_id : local_gecko_codes) {
 +      const std::string id = Lower(Trim(raw_id));
 +      for (const LocalGeckoCodeOption &opt : supported_local) {
 +        if (opt.id == id &&
++            std::ranges::find(active_local_options, &opt) ==
++                active_local_options.end()) {
++          active_local_options.push_back(&opt);
++          break;
++        }
++      }
++    }
++    if (current_config.aspect_ratio == "21:9") {
++      for (const LocalGeckoCodeOption &opt : supported_local) {
++        if (opt.id == "ultrawide_21_9" &&
 +            std::ranges::find(active_local_options, &opt) ==
 +                active_local_options.end()) {
 +          active_local_options.push_back(&opt);
@@ -2991,7 +3049,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..ea30c83 100644
+index 7699c3d..41c3654 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -3893,19 +3951,24 @@ index 7699c3d..ea30c83 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1322,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1322,36 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
 -    ImGui::TextUnformatted("Internal resolution (Dolphin EFB upscale)");
 -    if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
 +    ImGui::TextUnformatted("Display aspect ratio");
-+    const char* aspect_labels[] = {"Keep existing setting", "16:9 (native widescreen)", "4:3 (original)"};
-+    const char* aspect_values[] = {"", "16:9", "4:3"};
-+    int aspect_index = config.aspect_ratio == "16:9" ? 1 : config.aspect_ratio == "4:3" ? 2 : 0;
-+    if (ImGui::Combo("##aspect_ratio", &aspect_index, aspect_labels, 3)) {
++    const char* aspect_labels[] = {"Keep existing setting", "16:9 (native widescreen)", "21:9 (ultrawide)", "4:3 (original)"};
++    const char* aspect_values[] = {"", "16:9", "21:9", "4:3"};
++    int aspect_index = config.aspect_ratio == "16:9" ? 1 : config.aspect_ratio == "21:9" ? 2 : config.aspect_ratio == "4:3" ? 3 : 0;
++    if (ImGui::Combo("##aspect_ratio", &aspect_index, aspect_labels, 4)) {
 +      const auto previous_aspect = config.aspect_ratio;
 +      config.aspect_ratio = aspect_values[aspect_index];
++      if (config.aspect_ratio == "21:9") {
++        if (std::ranges::find(config.local_gecko_codes, "ultrawide_21_9") == config.local_gecko_codes.end()) {
++          config.local_gecko_codes.emplace_back("ultrawide_21_9");
++        }
++      }
 +      std::string error;
 +      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error)) {
 +        config.aspect_ratio = previous_aspect;
@@ -3913,7 +3976,7 @@ index 7699c3d..ea30c83 100644
 +        dialog.error = std::move(error);
 +      }
 +    }
-+    ImGui::TextWrapped("Match this to GX's Screen Mode in Options. Enable widescreen there for 16:9; the game remembers it in your save.");
++    ImGui::TextWrapped("Match this to GX's Screen Mode in Options. Enable widescreen there for 16:9 or 21:9; the game remembers it in your save.");
 +    ImGui::Spacing();
 +    ImGui::TextUnformatted("Resolution preset");
 +    const std::string resolution_preview = config.resolution == resolutions[resolution_index].text
@@ -3928,7 +3991,7 @@ index 7699c3d..ea30c83 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1381,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1386,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -3964,7 +4027,7 @@ index 7699c3d..ea30c83 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -993,18 +1422,17 @@ int main(int argc, char** argv)
+@@ -993,18 +1427,17 @@ int main(int argc, char** argv)
          const bool selected = controller_index == static_cast<int>(i);
          if (ImGui::Selectable(controllers[i].label.c_str(), selected))
          {
@@ -3987,7 +4050,7 @@ index 7699c3d..ea30c83 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,67 +1440,496 @@ int main(int argc, char** argv)
+@@ -1012,67 +1445,496 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -4248,12 +4311,12 @@ index 7699c3d..ea30c83 100644
 +        ImGui::Unindent();
 +      }
 +      ImGui::Spacing();
-+
+ 
+-    if (!extraction.running)
 +      ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Optional: entering the codes by hand");
 +      ImGui::TextWrapped("The newly discovered 2026 Gold Parts cheats (Thunderstorm, El Dorado, Chrono Symphony, Bahamut, Gladiator) are patched to work with a single controller (bypassing the 4-controller requirement).");
 +      ImGui::Spacing();
- 
--    if (!extraction.running)
++
 +      if (ImGui::TreeNode("View In-Game Button Cheats (F-Zero Shop)")) {
 +        ImGui::TextWrapped("Enter these button sequences in Customize > F-Zero Shop:");
 +        ImGui::Spacing();
@@ -4532,7 +4595,7 @@ index 7699c3d..ea30c83 100644
      }
  
      {
-@@ -1090,16 +1947,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +1952,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -4604,7 +4667,7 @@ index 7699c3d..ea30c83 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +2030,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +2035,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -4615,7 +4678,7 @@ index 7699c3d..ea30c83 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1165,6 +2081,13 @@ int main(int argc, char** argv)
+@@ -1165,6 +2086,13 @@ int main(int argc, char** argv)
        std::filesystem::create_directories(log_path.parent_path(), log_error);
        SDL_IOStream* log_stream =
            log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
@@ -4629,7 +4692,7 @@ index 7699c3d..ea30c83 100644
        SDL_Process* process = nullptr;
        std::string process_error;
        if (log_stream)
-@@ -1201,9 +2124,35 @@ int main(int argc, char** argv)
+@@ -1201,9 +2129,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -4667,7 +4730,7 @@ index 7699c3d..ea30c83 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +2188,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2193,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -4690,7 +4753,7 @@ index 7699c3d..ea30c83 100644
            }
            else
            {
-@@ -1266,8 +2218,24 @@ int main(int argc, char** argv)
+@@ -1266,8 +2223,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();

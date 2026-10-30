@@ -1,9 +1,28 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-10-29.
+Updated: 2026-10-30.
 
 
-## Latest update — Release 0.9.2: PAL (GFZP01) Support, Local Gecko Cheats & Beta Hotfixes Rollup, 2026-10-29
+## Latest update — Release 0.9.3: 21:9 Ultrawide Aspect Ratio, Presets & Automated Camera Patch, 2026-10-30
+
+1. **21:9 Ultrawide Display Support**:
+   - **Aspect Ratio Dropdown**: Added `21:9 (ultrawide)` to the launcher's display aspect ratio selector (`moderngekko_launcher.cpp`) and configuration parser (`frontend_config.cpp`).
+   - **Resolution Presets**: Added three new ultrawide presets to `SupportedResolutions()`:
+     - `1080p Ultrawide` (2560 × 1080, 3× EFB scale)
+     - `1440p Ultrawide` (3440 × 1440, 4× EFB scale)
+     - `4K / 5K2K Ultrawide` (5120 × 2160, 6× EFB scale)
+   - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::Stretch` and custom aspect ratio dimensions 21:9 when `aspect_ratio=21:9`, completely filling ultrawide displays in fullscreen and ultrawide windows without horizontal pillarboxing or letterboxing.
+
+2. **21:9 Projection & Camera FOV Patch**:
+   - Added gamemasterplc's 21:9 Gecko camera projection code for both NTSC-U (`GFZE01`) and PAL (`GFZP01`) into `SupportedLocalGeckoCodes()` (`ultrawide_21_9`).
+   - Selecting `21:9 (ultrawide)` in the launcher automatically enables the camera FOV code in `local_gecko_codes` and `EnsureCheatsConfigured`, ensuring correct 3D geometry and no distorted stretching out-of-the-box.
+   - Cleanly stripped in NetPlay lobbies to preserve deterministic online race sync.
+
+3. **Validation & Unit Testing**:
+   - Updated `tests/frontend_config_test.cpp` verifying 21:9 saving/loading, 9 resolution presets, and automated ultrawide Gecko code generation in `GameSettings` for both US and PAL builds. All tests passing.
+
+
+## Previous update — Release 0.9.2: PAL (GFZP01) Support, Local Gecko Cheats & Beta Hotfixes Rollup, 2026-10-29
 
 1. **PAL (`GFZP01`) Support**:
    - **Dual Disc ID Validation**: Configured `-DMODERNGEKKO_REQUIRED_DISC_ID="GFZE01,GFZP01"` across `build-glinux.sh`, `build-windows.ps1`, `package-windows.ps1`, and `audit-appdir.py`. Both `moderngekko_launcher.cpp` and `moderngekko_run.cpp` parse comma-separated disc ID lists and accept either `GFZE01` or `GFZP01`.

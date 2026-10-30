@@ -27,15 +27,15 @@ disc contents and personal memory-card saves are not included in the packages.
 
 - **USA (`GFZE01`) & PAL (`GFZP01`) support:** import either region's ISO or RVZ; PAL boots with 60Hz (`EuRGB60`) enabled for full 60 FPS gameplay.
 - **Controller-friendly launcher** with racing artwork, gamepad navigation and clear loading feedback.
-- **Six resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1440p and 4K.
+- **Nine resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K and 4K Ultrawide (5120×2160).
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
 - **Boost on X:** optional X/Y swap for modern four-button gamepads.
-- **Native widescreen:** use GX's own Screen Mode setting, saved on your memory card.
+- **Native widescreen & 21:9 Ultrawide:** use GX's own Screen Mode setting for 16:9, or choose 21:9 Ultrawide with automated FOV camera adjustment for ultrawide displays.
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
-- **Unlock everything & Local Gecko Codes (Experimental):** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 15 optional Ralf Gecko codes for Local Play (*Experimental - A work in progress*; automatically disabled in Online rooms).
+- **Unlock everything & Local Gecko Codes (Experimental):** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 16 optional Ralf & gamemasterplc Gecko codes for Local Play (*Experimental - A work in progress*; automatically disabled in Online rooms).
 - **Windows build:** a portable zip for Windows 10/11, with the same launcher and features.
 
 The current target is the game's normal **60 FPS** operation.
@@ -191,7 +191,7 @@ minutes on slower GPUs; later starts are fast.
 1. Select **Browse for ISO / RVZ** and import your USA (`GFZE01`) or PAL (`GFZP01`) game image. For Flatpak, use Downloads. PAL versions automatically run with 60Hz mode enabled.
 2. Open **Controller**, choose your gamepad and optionally enable **Boost on X**.
 3. Choose your graphics settings, then press **PLAY**. The loading screen stays visible while the game starts.
-4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 display setting in the launcher.
+4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 or 21:9 display setting in the launcher.
 
 To exit a race, press **Escape**, then use the D-pad and A/B on the confirmation
 window. Offline play pauses while the prompt is open; an online session keeps
@@ -259,7 +259,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Game versions | NTSC-U (`GFZE01`) and PAL (`GFZP01`) supported (PAL runs at 60Hz) |
 | JIT gameplay | Playable; smooth 60 FPS reported on that machine |
 | Static recompilation | Experimental; performance work remains |
-| Native widescreen | In-game setting; remembered in the player's save |
+| Native widescreen & 21:9 Ultrawide | 16:9 in-game setting + 21:9 Ultrawide with automated FOV camera geometry |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
