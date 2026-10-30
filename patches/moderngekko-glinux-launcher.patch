@@ -522,7 +522,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..5abb163 100644
+index 6bb9e0e..8dc4b95 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -695,7 +695,7 @@ index 6bb9e0e..5abb163 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +264,260 @@ int main() {
+@@ -138,6 +264,271 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -792,6 +792,17 @@ index 6bb9e0e..5abb163 100644
 +      if (!gfz_pal_ini.contains("142486E0 0001869F") ||
 +          !gfz_pal_ini.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]"))
 +        return 115;
++    }
++    // The verified 21:9 code exists for PAL only (GFZE01's slot stays empty).
++    {
++      std::ifstream in_pal(directory / "GameSettings" / "GFZP01.ini");
++      std::string pal_ini((std::istreambuf_iterator<char>(in_pal)), {});
++      std::ifstream in_usa(directory / "GameSettings" / "GFZE01.ini");
++      std::string usa_ini((std::istreambuf_iterator<char>(in_usa)), {});
++      if (!pal_ini.contains("14165040 40155555") ||
++          !pal_ini.contains("14162D60 3F100000") ||
++          usa_ini.contains("14165040") || usa_ini.contains("14162D60"))
++        return 130;
 +    }
 +    // Online (NetPlay) mode must strip local Gecko codes while keeping unlocks
 +    // if unlocks are enabled, or disabling EnableCheats if unlocks are off.
@@ -1013,7 +1024,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..2671141 100644
+index 03740d4..46d2002 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1051,7 +1062,7 @@ index 03740d4..2671141 100644
    return {};
  }
  
-@@ -73,24 +72,553 @@ std::string_view ControllerSectionPrefix() {
+@@ -73,24 +72,571 @@ std::string_view ControllerSectionPrefix() {
  
  } // namespace
  
@@ -1551,6 +1562,24 @@ index 03740d4..2671141 100644
 +          "E0000000 80008000\n",
 +      },
 +      {
++          // PAL only. Found by locating the game's aspect getter (reads the
++          // 16:9 float at po+0x165040) and the widescreen HUD X scale (0.75 at
++          // po+0x162D60) in the running GFZP01 module; tested in-game at 21:9.
++          // The GFZE01 21:9 code listed on gamemasterplc's site is untested
++          // here, so the NTSC-U slot stays empty.
++          "ultrawide_21_9_pal",
++          "Camera, HUD & Audio Tweaks",
++          "21:9 Ultrawide 3D & HUD (PAL only) [GLINUX]",
++          "PAL only. Widens the 3D view to a true 21:9 field of view and fixes the stretched HUD. Needs the in-game Screen Mode set to Wide Screen and the launcher's 21:9 aspect ratio.",
++          "$21:9 Ultrawide 3D & HUD (PAL only) [GLINUX]",
++          "",
++          "48000000 800030C8\n"
++          "DE000000 80008180\n"
++          "14165040 40155555\n"
++          "14162D60 3F100000\n"
++          "E0000000 80008000\n",
++      },
++      {
 +          "disable_low_energy_alerts",
 +          "Camera, HUD & Audio Tweaks",
 +          "Disable Low-Energy Alarm & Red Flashing [Ralf]",
@@ -1609,7 +1638,7 @@ index 03740d4..2671141 100644
  ConfigResult LoadConfig(const fs::path &user_directory,
                          bool create_if_missing) {
    const fs::path path = user_directory / "config.ini";
-@@ -126,6 +654,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -126,6 +672,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
        if (config.graphics_backend.empty())
          return {.error = "graphics backend must be Vulkan or OpenGL"};
      }
@@ -1639,7 +1668,7 @@ index 03740d4..2671141 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +691,33 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +709,33 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -1673,7 +1702,7 @@ index 03740d4..2671141 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +763,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +781,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -1692,7 +1721,7 @@ index 03740d4..2671141 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +796,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +814,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -1720,7 +1749,7 @@ index 03740d4..2671141 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +842,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,14 +860,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -1761,7 +1790,7 @@ index 03740d4..2671141 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -271,6 +889,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -271,6 +907,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
         << "address=" << config.netplay_address << '\n'
         << "port=" << config.netplay_port << '\n'
         << "buffer=" << config.netplay_buffer << '\n';
@@ -1770,7 +1799,7 @@ index 03740d4..2671141 100644
    return true;
  }
  
-@@ -336,6 +956,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +974,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -1833,7 +1862,7 @@ index 03740d4..2671141 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +1048,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +1066,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -1908,7 +1937,7 @@ index 03740d4..2671141 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -494,4 +1214,398 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1232,398 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }

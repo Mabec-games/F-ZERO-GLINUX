@@ -1,19 +1,20 @@
 # 21:9 for F-Zero GX: findings (2026-10-30)
 
 Goal: render F-Zero GX at 21:9 with a really widened field of view instead of
-stretching the 16:9 picture. Status: **no code was added to
-`SupportedLocalGeckoCodes()`**. Nothing could be run against a game here, and
-the rule is that a code only goes into the table after it was verified on the
-running game.
+stretching the 16:9 picture.
+
+Status: **PAL (GFZP01) solved and verified in the running game; NTSC-U (GFZE01)
+only has a sourced, untested code.** The PAL code `ultrawide_21_9_pal` is in
+`SupportedLocalGeckoCodes()` (GFZE01 slot empty). See "PAL result" below.
 
 ## Summary
 
 | Question | Result |
 | --- | --- |
 | Is there a sourced 21:9 code? | **Yes, for GFZE01 (NTSC-U) only.** Two independent pages list the same code (see below). |
-| Is there one for GFZP01 (PAL)? | **No source found.** |
+| Is there one for GFZP01 (PAL)? | **No source found; derived and verified here** (see "PAL result"). |
 | Was the removed "[gamemasterplc]" code invented? | **No.** Its 12 lines are identical to the sourced GFZE01 code. What was wrong: it was applied to GFZP01 with the same addresses, and "no source" in the earlier review was incorrect. |
-| Tested on a running game? | **No.** No GFZE01 disc exists on this machine, and the runtime was not built here. |
+| Tested on a running game? | **PAL: yes. NTSC-U: no** (no GFZE01 disc on this machine). |
 | Dolphin's own widescreen hack + `CustomStretch`? | Not judged; needs a running game. Code reading is below. |
 
 ## Sourced codes (GFZE01 only)
@@ -71,31 +72,76 @@ The 48:9 and 32:9 variants differ only in the ASCII label and these three words
   a module that the game links at runtime. Which module that is, and where the
   three words sit in it, was not determined.
 
-## Why this is not in the table
+## PAL result (verified)
 
-- It was never run against a game in this project, on any region.
-- The addresses are for GFZE01. Region addresses differ here (the Ralf 16:9 fix
-  uses `120062BC`/`12008D68` for GFZE01 and `140554A0` for GFZP01), so the same
-  lines must not be applied to GFZP01. In the PAL DOL, `0x800554A0` is a
-  `cmpwi r30,0x10` in a slot allocator, which confirms that `po` is not the DOL
-  base and that PAL offsets cannot be guessed from the US ones.
-- It cannot be derived for GFZP01 from the DOL alone: the three words live in
-  the runtime-linked module, which is not a file in the PAL disc image.
+Method: built the runtime (`scripts/build-glinux.sh`, JIT path), imported the
+GFZP01 RVZ with the launcher's `--extract`, booted it with the automation
+directory, dumped RAM (`read_memory`), found the module list head at
+`0x800030C8` -> `0x801BEF00` (module 1, the main game module; `po` in the
+Gecko codes, the address changes between boots), disassembled that module and
+confirmed each word by writing it live and by screenshots.
+
+| PAL word (`po`+) | Vanilla | Role (from code + screenshots) |
+| --- | --- | --- |
+| `0x165040` | `3FE38E39` (16/9) | Float returned by the aspect getter at `0x802665F0` when the game's Screen Mode is Wide (4/3 at `+0x165044` otherwise). Drives the 3D projection. |
+| `0x162D60` | `3F400000` (0.75) | HUD X scale used by the widescreen layout code at `0x802119EC`. |
+
+Code (opt-in, PAL only):
+
+```
+48000000 800030C8
+DE000000 80008180
+14165040 40155555
+14162D60 3F100000
+E0000000 80008000
+```
+
+Isolation test (each state started from a fresh race via Retry, 21:9 window,
+Mute City Twist Road, Time Attack, Blue Falcon):
+
+| State | 3D view | HUD |
+| --- | --- | --- |
+| both vanilla | 16:9 picture stretched (car about 1.31x too wide) | stretched |
+| `+0x165040` only | correct proportions, wider field of view | stretched |
+| `+0x162D60` only | stretched | correct |
+| both | correct | correct |
+
+The final check used the real Gecko path (`[Gameplay] cheats=true`,
+`gecko_codes=ultrawide_21_9_pal`, boot, menus, then a race), not memory writes.
+The menus (`Select Mode`, `Machine Settings`) also render in true proportions,
+centered 16:9 with the background filling the sides; a few scrolling header
+texts leak into the side areas.
+
+Notes and limits:
+
+- Needs the in-game Screen Mode set to Wide Screen and the launcher aspect 21:9.
+- The aspect word is read when the race camera is created, so changing it
+  mid-race has no effect until a Retry; the Gecko code is applied from boot.
+- `0.5625` is the value copied from the NTSC-U code; the exact HUD correction
+  for 21:9 would be (4/3) / (21/9) = 0.5714 (`3F124925`). Only `3F100000` was tested.
+- Not tested: split screen, other courses, geometry culling at the screen
+  edges, NetPlay (local Gecko codes are stripped online anyway), monitors other
+  than 21:9.
+- The NTSC-U code's third value pair (`141607E0`/`14161E98`) has no PAL
+  counterpart that mattered: only the aspect and HUD words were needed. What
+  those two NTSC-U words do is unknown.
+
+## Why NTSC-U is not in the table
+
+- The sourced GFZE01 code was never run against a game in this project; there
+  is no GFZE01 disc on this machine.
+- Region addresses differ (the Ralf 16:9 fix uses `120062BC`/`12008D68` for
+  GFZE01 and `140554A0` for GFZP01), so the PAL words cannot be reused.
 
 ## What was checked on this machine
 
-- A GFZP01 RVZ exists: `/SSDPlus/F-Zero GX (Europe) (EnFrDeEsIt).zip`
-  (contains `F-Zero GX (Europe) (En,Fr,De,Es,It).rvz`). **No GFZE01 image** was
-  found (searched the whole disk for `*.rvz`, `*.iso`, `*.gcm`, `*.ciso`, `*.gcz`,
-  extracted `GFZE01`/`GFZP01` directories and the `fzero-glinux` user directory).
-- The PAL image was decoded with a small private RVZ reader and its DOL
-  analyzed statically (SHA-1 `ab98630b653d009acd00699d2215dddb546d6b7f`; sections
-  `0x80003100..0x801AAE6C` including BSS). Findings: the DOL has no 16/9 or
-  21/9 float constants; the only 4/3 use (`0x80005748`) is an `lfs` feeding
-  a call at `0x800738E0` that was not identified. The words the 21:9 code
-  writes are not DOL addresses (see above), so the DOL alone does not show them.
-- The vendored Dolphin sources (`vendor/dolphin`) are not checked out here and
-  the runtime was not built, so nothing could be launched.
+- A GFZP01 RVZ exists (`/SSDPlus/F-Zero GX (Europe) (EnFrDeEsIt)/`). **No GFZE01
+  image** was found (searched the whole disk).
+- Static work on the PAL DOL (SHA-1 `ab98630b653d009acd00699d2215dddb546d6b7f`):
+  it has no 16/9 float; `0x800030C8` is the OS module queue head (`OSLink` at
+  `0x8000E64C`/`0x8000EB80`), so `po` is a runtime-linked module, not the DOL.
+- Runtime test results above; the unit test compiles and passes
+  (`tests/frontend_config_test.cpp`, exit code 130 checks the PAL-only entry).
 
 ## Dolphin's widescreen hack with `CustomStretch` (code reading only)
 
@@ -111,13 +157,11 @@ untested idea, not a result.
 
 ## Open / next steps
 
-1. **Test the sourced GFZE01 code** with a US disc: enable the game's 16:9
-   Screen Mode, launcher aspect 21:9, apply the 12 lines above as a local
-   Gecko code (outside the table), and look at the HUD, the edges of the track
-   and split-screen. If it holds, add it to the table for GFZE01 only, keep
-   GFZP01 empty and keep it opt-in (not default).
-2. **GFZP01**: build the runtime, boot the PAL image, dump memory through the
-   `0x800030C8` module, and locate the three float words (look for the vanilla
-   16:9 aspect `0x3FE38E39` and 9/16 `0x3F100000` near each other). Verify with
-   the game before adding.
-3. Compare plain `CustomStretch` against hack + `CustomStretch` on the game.
+1. **GFZE01**: test the sourced code above with a US disc (game Screen Mode
+   Wide, launcher aspect 21:9, local Gecko code). If it holds, add it to the
+   NTSC-U slot of `ultrawide_21_9_pal` (rename the entry) or, if it does not,
+   find the GFZE01 words the same way as for PAL (aspect getter + HUD scale).
+2. Split screen, culling at the edges and other courses on PAL.
+3. Compare plain `CustomStretch` against Dolphin's widescreen hack with
+   `CustomStretch` (not needed for PAL any more; the code gives the correct
+   result with the hack off).

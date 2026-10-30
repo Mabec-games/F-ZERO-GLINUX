@@ -30,7 +30,7 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Nine resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K and 4K Ultrawide (5120×2160).
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
 - **Boost on X:** optional X/Y swap for modern four-button gamepads.
-- **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors, but the game's 16:9 picture is stretched sideways (camera not widened, experimental).
+- **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. On PAL (`GFZP01`) the experimental local code "21:9 Ultrawide 3D & HUD (PAL only)" widens the 3D view and fixes the stretched HUD (tested in-game); on NTSC-U (`GFZE01`) the picture is still the 16:9 image stretched sideways.
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
@@ -259,7 +259,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Game versions | NTSC-U (`GFZE01`) and PAL (`GFZP01`) supported (PAL runs at 60Hz) |
 | JIT gameplay | Playable; smooth 60 FPS reported on that machine |
 | Static recompilation | Experimental; performance work remains |
-| Native widescreen / 21:9 | 16:9 in-game setting; 21:9 only stretches the 16:9 picture, no widened camera yet (research: `ULTRAWIDE-FINDINGS.md`) |
+| Native widescreen / 21:9 | 16:9 in-game setting. 21:9: PAL has a tested widened-camera code (experimental); NTSC-U only stretches the 16:9 picture (a sourced code is untested; see `ULTRAWIDE-FINDINGS.md`) |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |
