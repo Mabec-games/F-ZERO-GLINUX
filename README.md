@@ -30,12 +30,13 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Nine resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K and 4K Ultrawide (5120×2160).
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
 - **Boost on X:** optional X/Y swap for modern four-button gamepads.
+- **Steering wheels (experimental, untested):** an opt-in Controller setting lists your wheel, detects its steering, gas and brake axes, and uses Dolphin's GameCube steering wheel mode with force feedback in local play. Wheel drivers come from your system.
 - **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. The experimental local code "21:9 Ultrawide 3D & HUD" widens the 3D view and fixes the stretched HUD: tested in-game on PAL (`GFZP01`), briefly checked on NTSC-U (`GFZE01`).
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
-- **Unlock everything & Local Gecko Codes (Experimental):** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 15 optional Ralf Gecko codes for Local Play (*Experimental - A work in progress*; automatically disabled in Online rooms).
+- **Unlock everything & Local Gecko Codes (Experimental):** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 16 optional Gecko codes for Local Play (15 by Ralf, plus the 21:9 ultrawide code) (*Experimental - A work in progress*; automatically disabled in Online rooms).
 - **Windows build:** a portable zip for Windows 10/11, with the same launcher and features.
 
 The current target is the game's normal **60 FPS** operation.
@@ -138,21 +139,21 @@ installer or extra runtime needed. Saves are stored in `%LOCALAPPDATA%\fzero-gli
 
 ## Start playing
 
-The filenames below are those of the **v0.9** release. When building locally,
+The filenames below are those of the **v0.9.3** release. When building locally,
 find them in `dist/`. See [Releases](https://github.com/Mabec-games/F-ZERO-GLINUX/releases)
 for any published downloads; source publication does not automatically publish binaries.
 
 ### AppImage
 
 ```bash
-chmod +x F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage
-./F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage
+chmod +x F-ZERO-GLINUX-0.9.3-glibc2.35-x86_64.AppImage
+./F-ZERO-GLINUX-0.9.3-glibc2.35-x86_64.AppImage
 ```
 
 If FUSE is unavailable, run:
 
 ```bash
-./F-ZERO-GLINUX-0.9-glibc2.35-x86_64.AppImage --appimage-extract-and-run
+./F-ZERO-GLINUX-0.9.3-glibc2.35-x86_64.AppImage --appimage-extract-and-run
 ```
 
 The release AppImage is smoke-tested on Ubuntu 22.04 and 24.04, Debian 12 and

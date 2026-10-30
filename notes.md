@@ -1,9 +1,16 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-10-30.
+Updated: 2026-10-30 (v0.9.3).
 
 
-## Latest update — Release 0.9.3: 21:9 Ultrawide Aspect Ratio & Presets (no camera widening), 2026-10-30
+## Latest update — Release 0.9.3: Gecko fix, 21:9 ultrawide, experimental steering wheel, 2026-10-30
+
+0. **Release summary** (details below and in the commit messages):
+   - **Gecko codes activate again:** INIs written before v0.9.2 kept `$$Name` headers, which Dolphin never matches under `[Gecko_Enabled]`. The launcher now collapses leading `$` runs and rewrites those lines (`frontend_config.cpp`, test codes 201-202).
+   - **21:9 ultrawide** (from PR #13 by DomiLuebben): aspect option, three ultrawide presets, and the local code "21:9 Ultrawide 3D & HUD [GLINUX]". PAL tested in-game; the NTSC-U version uses the sourced US code's value words and was briefly checked (US disc, letterboxed on a 16:9 monitor, picture not stretched).
+   - **Experimental steering wheel:** Controller checkbox lists wheels/joysticks, Detect buttons for steering/gas/brake, port 1 set to Dolphin's GameCube wheel (`SIDevice0 = 8`) offline only, constant-effect force feedback with a reverse option. Untested on real hardware.
+   - Dev CI run for `9c19b75` passed (AppImage build + smoke tests on Ubuntu 22.04/24.04, Debian 12, Fedora 40; Windows zip build + smoke test).
+
 
 1. **21:9 Ultrawide Display Support**:
    - **Aspect Ratio Dropdown**: Added `21:9 (ultrawide)` to the launcher's display aspect ratio selector (`moderngekko_launcher.cpp`) and configuration parser (`frontend_config.cpp`).
@@ -11,7 +18,7 @@ Updated: 2026-10-30.
      - `1080p Ultrawide` (2560 × 1080, 3× EFB scale)
      - `1440p Ultrawide` (3440 × 1440, 4× EFB scale)
      - `4K / 5K2K Ultrawide` (5120 × 2160, 6× EFB scale)
-   - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::CustomStretch` (exact 21:9, letterboxed in other windows; plain `Stretch` ignores the custom ratio and uses the window's) when `aspect_ratio=21:9`. The picture is the game's 16:9 image stretched to 21:9; not tested against a running game.
+   - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::CustomStretch` (exact 21:9, letterboxed in other windows; plain `Stretch` ignores the custom ratio and uses the window's) when `aspect_ratio=21:9`. Without the 21:9 Gecko code the picture is the game's 16:9 image stretched to 21:9.
 
 2. **No 21:9 camera code in the table (reviewed and researched 2026-10-30)**:
    - The first version shipped a Gecko code "21:9 Ultrawide Camera FOV [gamemasterplc]" with identical addresses for GFZE01 and GFZP01 (every real code here differs per region). Removed, together with the automatic enabling in launcher and `EnsureCheatsConfigured`.

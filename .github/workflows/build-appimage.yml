@@ -59,11 +59,11 @@ jobs:
 
       - name: Package AppImage
         run: |
-          # Release tags name the AppImage after the version, e.g. v0.9.2 -> 0.9.2.
+          # Release tags name the AppImage after the version, e.g. v0.9.3 -> 0.9.3.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export GLINUX_VERSION="${GITHUB_REF_NAME#v}"
           elif [ -z "${GLINUX_VERSION:-}" ]; then
-            export GLINUX_VERSION="0.9.2"
+            export GLINUX_VERSION="0.9.3"
           fi
           bash scripts/package-appimage.sh
 
