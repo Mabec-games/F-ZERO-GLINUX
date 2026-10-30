@@ -522,7 +522,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..2fb2fc9 100644
+index 6bb9e0e..a0977f8 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -789,7 +789,7 @@ index 6bb9e0e..2fb2fc9 100644
 +    {
 +      std::ifstream in_pal(directory / "GameSettings" / "GFZP01.ini");
 +      std::string gfz_pal_ini((std::istreambuf_iterator<char>(in_pal)), {});
-+      if (!gfz_pal_ini.contains("142486E0 0001869F") ||
++      if (!gfz_pal_ini.contains("142486F8 0001869F") ||
 +          !gfz_pal_ini.contains("$Enable Booster From Lap 1 (All Modes) [Ralf]"))
 +        return 115;
 +    }
@@ -1124,7 +1124,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..7dc0cc5 100644
+index 03740d4..a1fe103 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -2212,7 +2212,7 @@ index 03740d4..7dc0cc5 100644
  bool EnsureControllerConfig(const fs::path &user_directory,
                              std::span<const std::string> controllers,
                              std::string *message) {
-@@ -494,4 +1395,406 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1395,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -2293,15 +2293,16 @@ index 03740d4..7dc0cc5 100644
 +  // Every unlock code loads po from the OS module list head (0x800030C8, the
 +  // main module's header; its address varies between boots), checks it, then
 +  // writes the save fields in _Main.rel relative to po:
-+  //   NTSC-U (GFZE01) / PAL (GFZP01, shifted by +0xACE8):
++  //   NTSC-U (GFZE01) / PAL (GFZP01; +0xACE8 for machines/parts, +0xAD00 from
++  //   tickets on, both read from the PAL accessors at po+0x243E00 + disp):
 +  //   po+0x239118 / po+0x243E00 u64  machines available in the shop (ids 0-40)
 +  //   po+0x239120 / po+0x243E08 u64  custom parts available, ids 0-63 (Gold Parts included)
 +  //   po+0x239128 / po+0x243E10 u64  custom parts available, ids 64-74
-+  //   po+0x23D9F8 / po+0x2486E0 u32  tickets (the shop caps them at 99,999)
-+  //   po+0x23DA00 / po+0x2486E8 u32  staff ghosts unlocked
-+  //   po+0x23DA04 / po+0x2486EC u32  cups unlocked & story chapters unlocked
-+  //   po+0x23DA08 / po+0x2486F0 u32  master class & finale movies unlocked
-+  //   po+0x23DA10 / po+0x2486F8 u32  shop songs, 0x1 and 0x4 = Sounds of MUTE CITY / BIG BLUE
++  //   po+0x23D9F8 / po+0x2486F8 u32  tickets (the shop caps them at 99,999)
++  //   po+0x23DA00 / po+0x248700 u32  staff ghosts unlocked
++  //   po+0x23DA04 / po+0x248704 u32  cups unlocked & story chapters unlocked
++  //   po+0x23DA08 / po+0x248708 u32  master class & finale movies unlocked
++  //   po+0x23DA10 / po+0x248710 u32  shop songs, 0x1 and 0x4 = Sounds of MUTE CITY / BIG BLUE
 +  constexpr std::string_view kNtscUnlockDefs =
 +      "$Max Tickets (99,999)\n"
 +      "48000000 800030C8\n"
@@ -2353,7 +2354,7 @@ index 03740d4..7dc0cc5 100644
 +      "$Max Tickets (99,999)\n"
 +      "48000000 800030C8\n"
 +      "DE000000 80008180\n"
-+      "142486E0 0001869F\n"
++      "142486F8 0001869F\n"
 +      "E0000000 80008000\n"
 +      "$All Machines Unlocked (AX + Dark Schneider)\n"
 +      "48000000 800030C8\n"
@@ -2371,29 +2372,29 @@ index 03740d4..7dc0cc5 100644
 +      "$All Cups Unlocked (AX Cup included)\n"
 +      "48000000 800030C8\n"
 +      "DE000000 80008180\n"
-+      "92210000 002486EC\n"
++      "92210000 00248704\n"
 +      "86200000 FC000000\n"
-+      "94210000 002486EC\n"
++      "94210000 00248704\n"
 +      "E0000000 80008000\n"
 +      "$Sounds of MUTE CITY & BIG BLUE for Sale\n"
 +      "48000000 800030C8\n"
 +      "DE000000 80008180\n"
-+      "92210000 002486F8\n"
++      "92210000 00248710\n"
 +      "86200000 00000005\n"
-+      "94210000 002486F8\n"
++      "94210000 00248710\n"
 +      "E0000000 80008000\n"
 +      "$All Staff Ghosts Unlocked [Ralf]\n"
 +      "48000000 800030C8\n"
 +      "DE000000 80008180\n"
-+      "142486E8 03FFFFFF\n"
++      "14248700 03FFFFFF\n"
 +      "E0000000 80008000\n"
 +      "$All Story Mode Chapters & Finale Movies Unlocked [Ralf]\n"
 +      "48000000 800030C8\n"
 +      "DE000000 80008180\n"
-+      "92110000 002486EE\n"
++      "92110000 00248706\n"
 +      "86200000 000001FF\n"
-+      "94110000 002486EE\n"
-+      "142486F0 FFFFFFFF\n"
++      "94110000 00248706\n"
++      "14248708 FFFFFFFF\n"
 +      "E0000000 80008000\n";
 +
 +  const std::vector<std::string> unlock_codes = {

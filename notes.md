@@ -1213,12 +1213,12 @@ text; ignore it if fetched again.
   - `PatchRelGoldCheats` dynamically applies the single-controller patch to whichever overlay module is present (`fze.*` or `fzp.*`).
 - **Dynamic Save-Data Unlocks & Memory Offsets**:
   - Mapped the save unlock memory block inside PAL's `_Main.rel`, which is shifted by **`+0xACE8`** relative to `po = [0x800030C8]`:
-    - Tickets (99,999): `po+0x2486E0` (vs `po+0x23D9F8` in NTSC-U)
+    - Tickets (99,999): `po+0x2486F8` (vs `po+0x23D9F8` in NTSC-U)
     - Machines (AX + Dark Schneider): `po+0x243E00` / `po+0x243E04` (vs `po+0x239118` / `po+0x23911C`)
     - Custom Parts (including 15 Gold Parts): `po+0x243E08` / `po+0x243E0C` / `po+0x243E14` (vs `po+0x239120` / `po+0x239124` / `po+0x23912C`)
-    - Cups & Chapters: `po+0x2486EC` / `po+0x2486EE` / `po+0x2486F0` (vs `po+0x23DA04` / `po+0x23DA06` / `po+0x23DA08`)
-    - Staff Ghosts: `po+0x2486E8` (vs `po+0x23DA00`)
-    - Shop Songs (Mute City & Big Blue remixes): `po+0x2486F8` (vs `po+0x23DA10`)
+    - Cups & Chapters: `po+0x248704` / `po+0x248706` / `po+0x248708` (vs `po+0x23DA04` / `po+0x23DA06` / `po+0x23DA08`)
+    - Staff Ghosts: `po+0x248700` (vs `po+0x23DA00`)
+    - Shop Songs (Mute City & Big Blue remixes): `po+0x248710` (vs `po+0x23DA10`)
   - `EnsureCheatsConfigured` automatically writes matched unlock codes to both `GFZE01.ini` and `GFZP01.ini`.
 - **CPU Core Execution**:
   - ModernGekko runner configures PAL games to execute on Dolphin's 64-bit JIT compiler (`MAIN_CPU_CORE`), while maintaining StaticRecomp support for NTSC-U.
@@ -1257,3 +1257,18 @@ text; ignore it if fetched again.
   - SHA-256: `3d126de464b5469f973f6ee5e1afad69449a2791bf6784d1c4313ed9705a31fd`
 - **Published**:
   - Pushed to `glinux/main` and created GitHub release `v0.9.2` (Latest) at `https://github.com/Mabec-games/F-ZERO-GLINUX/releases/tag/v0.9.2`.
+
+## Fix: "Unlock Everything" did nothing on PAL (2026-10-30)
+- Symptom: the top cheat box worked on NTSC-U but not on PAL (GFZP01).
+- Cause: PAL addresses were all NTSC + 0xACE8. That holds for machines/parts (po+0x243E00..), but from tickets on PAL is NTSC + 0xAD00. Found by reading the PAL ticket getter/setter in RAM (`lis r4,0x8040; addi r5,r4,0x2F80; lwz r4,0x48F8(r5)` = po+0x2486F8, capped at 0x1869F); no PAL code touches po+0x2486E0..0x2486F4. The old songs code ORed 0x5 into the real ticket word.
+- PAL now: tickets 0x2486F8, ghosts 0x248700, cups/chapters 0x248704/06, master/finale 0x248708, songs 0x248710.
+- Verified headless (PAL ISO, profile copy, `--cheats`): all fields set in RAM at the new addresses. frontend_config tests pass. Not yet checked in the PAL shop UI.
+
+## TODO: new launcher/app icon (requested 2026-10-30, not done yet)
+- User wants `/home/martin/Downloads/F-ZERO GX/img/icon.png` as the icon from now on, **including public `glinux` releases** (user's decision; it is Nintendo's F-ZERO logo). No repackaging needed now: do it in the next build/release.
+- Source: 877×217 RGBA PNG (wide chrome F-ZERO logo, transparent background), sha256 `f2dbfb2135987fa700bb43086767c614382459323b0aa292df6a34f70c0c82bf`. Copy it into the repo (e.g. `packaging/fzero-glinux.png`) since `img/` is outside the repo.
+- Icons it must replace (all currently come from `packaging/fzero-glinux.svg`):
+  - AppImage: `scripts/package-appimage.sh` `--icon-file` (desktop `Icon=fzero-glinux`).
+  - Flatpak: `scripts/prepare-flatpak.py` copies the svg (`Icon=io.github.mabecgames.FZeroGLinux`).
+  - Windows: `scripts/make-windows-icon.py` renders the svg to `packaging/windows/fzero-glinux.ico` (embedded via `MODERNGEKKO_WINDOWS_ICON` for launcher + runner).
+- The logo is ~4:1, icons must be square: pad onto a transparent square canvas (logo centred, full width) and render 16–256 px sizes; check that it stays readable at 16/32 px.
