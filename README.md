@@ -259,7 +259,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Game versions | NTSC-U (`GFZE01`) and PAL (`GFZP01`) supported (PAL runs at 60Hz) |
 | JIT gameplay | Playable; smooth 60 FPS reported on that machine |
 | Static recompilation | Experimental; performance work remains |
-| Native widescreen / 21:9 | 16:9 in-game setting; 21:9 only stretches the 16:9 picture, no widened camera yet |
+| Native widescreen / 21:9 | 16:9 in-game setting; 21:9 only stretches the 16:9 picture, no widened camera yet (research: `ULTRAWIDE-FINDINGS.md`) |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |

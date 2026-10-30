@@ -13,9 +13,10 @@ Updated: 2026-10-30.
      - `4K / 5K2K Ultrawide` (5120 × 2160, 6× EFB scale)
    - **Runtime Display Configuration**: Configures Dolphin with `AspectMode::CustomStretch` (exact 21:9, letterboxed in other windows; plain `Stretch` ignores the custom ratio and uses the window's) when `aspect_ratio=21:9`. The picture is the game's 16:9 image stretched to 21:9; not tested against a running game.
 
-2. **No 21:9 camera code (review 2026-10-30)**:
-   - The first version shipped a Gecko code "21:9 Ultrawide Camera FOV [gamemasterplc]". It had no source (no search hit), identical addresses for GFZE01 and GFZP01 (every real code here differs per region) and wrote the ASCII text "21:9" into memory. Removed, together with the automatic enabling in launcher and `EnsureCheatsConfigured`.
-   - Open: a real widened-camera code needs its own reverse engineering of the projection setup.
+2. **No 21:9 camera code in the table (reviewed and researched 2026-10-30)**:
+   - The first version shipped a Gecko code "21:9 Ultrawide Camera FOV [gamemasterplc]" with identical addresses for GFZE01 and GFZP01 (every real code here differs per region). Removed, together with the automatic enabling in launcher and `EnsureCheatsConfigured`.
+   - Correction to the first review: the code was **not invented**. Its 12 lines match the "21:9" entry on gamemasterplc's GFZE01 page and Almar's Guides (US) character for character; a 32:9 sibling exists on the Dolphin forum. It is a **GFZE01-only** code (the `ASCII "21:9"` write is a menu label, the three floats are a stored aspect plus two scale factors). It was never tested in this project, and no GFZP01 equivalent was found.
+   - Full write-up, URLs, what was checked (a PAL RVZ exists on this machine, no US disc) and the open steps: `ULTRAWIDE-FINDINGS.md`. Open: test the GFZE01 code with a US disc; find the GFZP01 addresses by dumping the runtime-linked module (`[0x800030C8]`) in the running game.
 
 3. **Validation & Unit Testing**:
    - Updated `tests/frontend_config_test.cpp` verifying 21:9 saving/loading and the 9 resolution presets. Not run: the game itself (no ISO here) and a full AppImage build.
