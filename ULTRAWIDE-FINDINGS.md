@@ -176,3 +176,8 @@ ASCII "21:9" label write (`303EA9E8`/`143EA9E0`/`143EA9E4`) is left out. This
 is untested on a running GFZE01 game; it can be checked on a 16:9 monitor (the
 21:9 picture is letterboxed) by comparing a race with and without the code. If
 it does not hold, find the GFZE01 words the same way as for PAL.
+
+Quick check, same day: US disc, launcher aspect 21:9 on a 1440p (16:9)
+monitor, game Screen Mode Wide, code on: letterboxed 21:9 picture, cars and
+HUD not stretched. No side-by-side comparison with the code off yet;
+split screen and other courses are still untested.

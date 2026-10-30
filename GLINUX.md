@@ -211,7 +211,7 @@ Run `bash scripts/play-glinux.sh` to use the JIT launcher with existing saves.
   The 800p preset requests 1280x800 with 2x internal EFB rendering. Use 16:9
   display aspect with the game's widescreen setting for correct proportions
   and letterboxing on the Deck. Ultrawide presets pair with the 21:9 aspect ratio, which stretches the
-  game's 16:9 picture sideways; the local Gecko code "21:9 Ultrawide 3D & HUD" widens the camera. It is tested in-game on PAL (`GFZP01`); the NTSC-U (`GFZE01`) version uses the sourced US code's values and is untested (see `ULTRAWIDE-FINDINGS.md`). Existing legacy render-scale values still load.
+  game's 16:9 picture sideways; the local Gecko code "21:9 Ultrawide 3D & HUD" widens the camera. It is tested in-game on PAL (`GFZP01`); the NTSC-U (`GFZE01`) version uses the sourced US code's values and has only been briefly checked (see `ULTRAWIDE-FINDINGS.md`). Existing legacy render-scale values still load.
 - VSync On/Off; anti-aliasing Off/FXAA/4x MSAA; anisotropic filtering
   1x/2x/4x/8x/16x. Unsupported MSAA falls back to Off in Dolphin. FXAA's shader
   is included in the built Sys/Shaders resources. Graphics apply at game launch.

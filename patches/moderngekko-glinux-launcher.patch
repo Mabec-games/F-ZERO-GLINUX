@@ -1124,7 +1124,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..175afac 100644
+index 03740d4..7dc0cc5 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1162,7 +1162,7 @@ index 03740d4..175afac 100644
    return {};
  }
  
-@@ -73,24 +72,578 @@ std::string_view ControllerSectionPrefix() {
+@@ -73,24 +72,579 @@ std::string_view ControllerSectionPrefix() {
  
  } // namespace
  
@@ -1665,14 +1665,15 @@ index 03740d4..175afac 100644
 +          // PAL: found by locating the game's aspect getter (reads the 16:9
 +          // float at po+0x165040) and the widescreen HUD X scale (0.75 at
 +          // po+0x162D60) in the running GFZP01 module; tested in-game at 21:9.
-+          // NTSC-U: UNTESTED. The value words of the GFZE01 21:9 code from
++          // NTSC-U: briefly checked (2026-10-30, US disc, 21:9 letterboxed on a
++          // 16:9 monitor: picture not stretched). The value words of the GFZE01 21:9 code from
 +          // gamemasterplc's site and Almar's Guides (two HUD scales and the
 +          // aspect); its ASCII "21:9" label write is left out. The id keeps
 +          // its old name so saved selections still apply.
 +          "ultrawide_21_9_pal",
 +          "Camera, HUD & Audio Tweaks",
 +          "21:9 Ultrawide 3D & HUD [GLINUX]",
-+          "Widens the 3D view to a true 21:9 field of view and fixes the stretched HUD. Tested on PAL; the US version is untested. Needs the in-game Screen Mode set to Wide Screen and the launcher's 21:9 aspect ratio.",
++          "Widens the 3D view to a true 21:9 field of view and fixes the stretched HUD. Tested on PAL; briefly checked on US. Needs the in-game Screen Mode set to Wide Screen and the launcher's 21:9 aspect ratio.",
 +          "$21:9 Ultrawide 3D & HUD [GLINUX]",
 +          "48000000 800030C8\n"
 +          "DE000000 80008180\n"
@@ -1745,7 +1746,7 @@ index 03740d4..175afac 100644
  ConfigResult LoadConfig(const fs::path &user_directory,
                          bool create_if_missing) {
    const fs::path path = user_directory / "config.ini";
-@@ -126,6 +679,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -126,6 +680,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
        if (config.graphics_backend.empty())
          return {.error = "graphics backend must be Vulkan or OpenGL"};
      }
@@ -1775,7 +1776,7 @@ index 03740d4..175afac 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +716,47 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +717,47 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -1823,7 +1824,7 @@ index 03740d4..175afac 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +802,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +803,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -1842,7 +1843,7 @@ index 03740d4..175afac 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +835,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +836,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -1870,7 +1871,7 @@ index 03740d4..175afac 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +881,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,14 +882,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -1911,7 +1912,7 @@ index 03740d4..175afac 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -266,11 +923,25 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -266,11 +924,25 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      }
      file << "controller" << i + 1 << '=' << config.controllers[i] << '\n';
    }
@@ -1937,7 +1938,7 @@ index 03740d4..175afac 100644
    return true;
  }
  
-@@ -336,6 +1007,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +1008,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -2000,7 +2001,7 @@ index 03740d4..175afac 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +1099,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -372,27 +1100,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -2075,7 +2076,7 @@ index 03740d4..175afac 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -477,6 +1248,135 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -477,6 +1249,135 @@ bool GenerateControllerConfig(const fs::path &user_directory,
        user_directory, std::span<const std::string>(&value, 1), message);
  }
  
@@ -2211,7 +2212,7 @@ index 03740d4..175afac 100644
  bool EnsureControllerConfig(const fs::path &user_directory,
                              std::span<const std::string> controllers,
                              std::string *message) {
-@@ -494,4 +1394,406 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1395,406 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -3334,7 +3335,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..88606de 100644
+index 7699c3d..9ad4eaf 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -4391,7 +4392,7 @@ index 7699c3d..88606de 100644
 +        dialog.error = std::move(error);
 +      }
 +    }
-+    ImGui::TextWrapped("Match this to GX's Screen Mode in Options. Enable widescreen there for 16:9 or 21:9; the game remembers it in your save. 21:9 alone stretches the game's 16:9 picture sideways; the 21:9 Ultrawide Gecko code widens the camera and fixes the HUD (tested on PAL, untested on US).");
++    ImGui::TextWrapped("Match this to GX's Screen Mode in Options. Enable widescreen there for 16:9 or 21:9; the game remembers it in your save. 21:9 alone stretches the game's 16:9 picture sideways; the 21:9 Ultrawide Gecko code widens the camera and fixes the HUD (tested on PAL, briefly checked on US).");
 +    ImGui::Spacing();
 +    ImGui::TextUnformatted("Resolution preset");
 +    const std::string resolution_preview = config.resolution == resolutions[resolution_index].text
