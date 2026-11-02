@@ -738,10 +738,30 @@ index 3402fda..b2689bc 100644
  
    case WM_SYSKEYDOWN:
 diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
-index 8d0ae0c..3a93199 100644
+index 8d0ae0c..8a3b3b2 100644
 --- a/Source/Core/DolphinNoGUI/PlatformX11.cpp
 +++ b/Source/Core/DolphinNoGUI/PlatformX11.cpp
-@@ -96,13 +96,19 @@ bool PlatformX11::Init()
+@@ -17,6 +17,7 @@ static constexpr auto X_None = None;
+ #include "Core/State.h"
+ #include "Core/System.h"
+ 
++#include <chrono>
+ #include <cstring>
+ #include <thread>
+ 
+@@ -49,8 +50,11 @@ private:
+   void CloseDisplay();
+   void UpdateWindowPosition();
+   void ProcessEvents();
++  void KeepScreenAwake();
+ 
+   Display* m_display = nullptr;
++  bool m_keep_screen_awake = false;
++  std::chrono::steady_clock::time_point m_next_screensaver_reset{};
+   Window m_window = {};
+   Cursor m_blank_cursor = X_None;
+ #ifdef HAVE_XRANDR
+@@ -96,20 +100,29 @@ bool PlatformX11::Init()
    pid_t pid = getpid();
    XChangeProperty(m_display, m_window, XInternAtom(m_display, "_NET_WM_PID", False), XA_CARDINAL,
                    32, PropModeReplace, reinterpret_cast<unsigned char*>(&pid), 1);
@@ -763,7 +783,52 @@ index 8d0ae0c..3a93199 100644
    XMapRaised(m_display, m_window);
    XFlush(m_display);
    XSync(m_display, True);
-@@ -192,9 +198,9 @@ void PlatformX11::ProcessEvents()
+   ProcessEvents();
+ 
+   if (Config::Get(Config::MAIN_DISABLE_SCREENSAVER))
++  {
+     UICommon::InhibitScreenSaver(true);
++    m_keep_screen_awake = true;
++  }
+ 
+ #ifdef HAVE_XRANDR
+   m_xrr_config = new X11Utils::XRRConfiguration(m_display, m_window);
+@@ -154,6 +167,7 @@ void PlatformX11::MainLoop()
+     Core::HostDispatchJobs(Core::System::GetInstance());
+     ProcessEvents();
+     UpdateWindowPosition();
++    KeepScreenAwake();
+ 
+     // TODO: Is this sleep appropriate?
+     std::this_thread::sleep_for(std::chrono::milliseconds(1));
+@@ -170,6 +184,26 @@ WindowSystemInfo PlatformX11::GetWindowSystemInfo() const
+   return wsi;
+ }
+ 
++// Gamepad input does not reset the X server's idle timers, so a controller-only
++// session would blank the screen (DPMS) or start the screensaver. Without Qt,
++// UICommon::InhibitScreenSaver is a no-op here; reset the timers periodically
++// like SDL and mpv do. Paused (F10) emulation lets the screen sleep normally.
++void PlatformX11::KeepScreenAwake()
++{
++  if (!m_keep_screen_awake)
++    return;
++
++  const auto now = std::chrono::steady_clock::now();
++  if (now < m_next_screensaver_reset)
++    return;
++  m_next_screensaver_reset = now + std::chrono::seconds(30);
++
++  if (Core::GetState(Core::System::GetInstance()) == Core::State::Paused)
++    return;
++  XResetScreenSaver(m_display);
++  XFlush(m_display);
++}
++
+ void PlatformX11::UpdateWindowPosition()
+ {
+   if (m_window_fullscreen)
+@@ -192,9 +226,9 @@ void PlatformX11::ProcessEvents()
      {
      case KeyPress:
        key = XLookupKeysym((XKeyEvent*)&event, 0);
