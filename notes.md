@@ -1285,6 +1285,7 @@ text; ignore it if fetched again.
   - `ValidZButton` rejects A/B/X/Y, Start, Guide (a stray press during Detect bound Z to them).
   - Detect/Reset use new `SetControllerZButton`: rewrites only the matching pad's `Buttons/Z` line in the existing GCPadNew.ini (custom + multi-pad profiles kept); regenerates only if no section uses that device. One config save instead of three.
   - Collapsing CONTROLLER now stops Z and wheel detection (polling ran only while open, so a later press was taken).
-  - Left open: Z that SDL maps to a trigger axis (wait for reporter), one Z binding per launcher tied to SDL index, "Button 21-25" name clash, Wayland idle for #17 (X11 reset only).
+  - 2026-11-07 (after on-screen test with an 8BitDo Ultimate 2C: Detect → Shoulder R worked, spin OK): Detect also takes LT/RT (`Trigger L`/`Trigger R`, pull past half); the row shows an amber warning that the trigger is also GameCube L/R, so every L/R press fires Z too. This also covers an adapter whose Z SDL maps to a trigger axis.
+  - Left open: one Z binding per launcher tied to SDL index, "Button 21-25" name clash, Wayland idle for #17 (X11 reset only).
 - Player-facing reply posted by the user (no Dolphin needed; asks for: what Detect shows, GBros mode XInput/Switch, controller name in the launcher list).
 - Next: when the reporter answers, consider a built-in GBros default (match device name); look at the Z row in the launcher; commit + push to `dev`; ship in next build (or a test AppImage if asked).

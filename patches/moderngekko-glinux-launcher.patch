@@ -522,7 +522,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..5529ae5 100644
+index 6bb9e0e..9c0822d 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -698,7 +698,7 @@ index 6bb9e0e..5529ae5 100644
 +    if (!ValidZButton("Misc 1") || !ValidZButton("Button 11") || !ValidZButton("Paddle 1") ||
 +        ValidZButton("Pad N") || ValidZButton("Button S") || ValidZButton("Start") ||
 +        ValidZButton("Guide") || ValidZButton("Button") || ValidZButton("Button 1234") ||
-+        ValidZButton("Trigger R") || ValidZButton("Misc 1`\nButtons/A = x"))
++        !ValidZButton("Trigger R") || ValidZButton("Trigger") || ValidZButton("Misc 1`\nButtons/A = x"))
 +      return 66;
 +    if (moderngekko::frontend::GamepadButtonName(15) != "Misc 1" ||
 +        moderngekko::frontend::GamepadButtonName(22) != "Button 22")
@@ -1193,7 +1193,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..a3ac79c 100644
+index 03740d4..ab99e25 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -2281,7 +2281,7 @@ index 03740d4..a3ac79c 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -477,6 +1363,170 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -477,6 +1363,173 @@ bool GenerateControllerConfig(const fs::path &user_directory,
        user_directory, std::span<const std::string>(&value, 1), message);
  }
  
@@ -2311,6 +2311,9 @@ index 03740d4..a3ac79c 100644
 +  if (std::ranges::find(GAMEPAD_BUTTON_NAMES, value) != std::end(GAMEPAD_BUTTON_NAMES))
 +    return !IsDpadName(value) && !value.starts_with("Button ") && value != "Start" &&
 +           value != "Guide";
++  // LT/RT; the launcher warns that they also act as GameCube L/R.
++  if (value == "Trigger L" || value == "Trigger R")
++    return true;
 +  // "Button <n>": raw joystick buttons SDL's mapping leaves unnamed.
 +  constexpr std::string_view prefix = "Button ";
 +  if (!value.starts_with(prefix) || value.size() < prefix.size() + 1 ||
@@ -2452,7 +2455,7 @@ index 03740d4..a3ac79c 100644
  bool EnsureControllerConfig(const fs::path &user_directory,
                              std::span<const std::string> controllers,
                              std::string *message) {
-@@ -494,4 +1544,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1547,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -2861,7 +2864,7 @@ index 03740d4..a3ac79c 100644
 +}
  } // namespace moderngekko::frontend
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..3d4dcb0 100644
+index 3b18d05..354a0ce 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
 @@ -8,9 +8,22 @@
@@ -2978,7 +2981,7 @@ index 3b18d05..3d4dcb0 100644
 +// "Axis <n>+" or "Axis <n>-" (optionally "Full Axis ..."), the names Dolphin
 +// gives raw SDL joystick axes. Steering must be a plain "Axis" name.
 +bool ValidWheelAxis(std::string_view value);
-+// A Dolphin SDL gamepad button name ("Misc 1", "Paddle 2", "Button 11", ...)
++// A Dolphin SDL gamepad input name ("Misc 1", "Paddle 2", "Button 11", "Trigger R", ...)
 +// that can be bound to GameCube Z.
 +bool ValidZButton(std::string_view value);
 +// Dolphin's input name for an SDL_GamepadButton value.
@@ -3592,7 +3595,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..2463c7d 100644
+index 7699c3d..3ccb1dd 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -4390,7 +4393,7 @@ index 7699c3d..2463c7d 100644
      {
        std::lock_guard lock(dialog.mutex);
        dialog.error = std::move(error);
-@@ -668,6 +1109,170 @@ int main(int argc, char** argv)
+@@ -668,6 +1109,185 @@ int main(int argc, char** argv)
      controller_status = std::move(message);
      return true;
    };
@@ -4469,6 +4472,7 @@ index 7699c3d..2463c7d 100644
 +    std::vector<bool> rest_buttons;
 +    std::vector<bool> rest_raw;
 +    std::vector<bool> raw_mapped;
++    std::vector<bool> rest_triggers;
 +    Uint64 started = 0;
 +  } z_detect;
 +  const auto stop_z_detect = [&]
@@ -4528,6 +4532,8 @@ index 7699c3d..2463c7d 100644
 +      }
 +      for (int i = 0; i < raw_count; ++i)
 +        z_detect.rest_raw.push_back(SDL_GetJoystickButton(joystick, i));
++      for (const auto axis : {SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER})
++        z_detect.rest_triggers.push_back(SDL_GetGamepadAxis(pad, axis) > 8000);
 +      return;
 +    }
 +    for (int b = 0; b < static_cast<int>(z_detect.rest_buttons.size()); ++b)
@@ -4552,6 +4558,18 @@ index 7699c3d..2463c7d 100644
 +      apply_z(std::move(device), "Button " + std::to_string(i));
 +      return;
 +    }
++    // LT/RT are axes. They also drive GameCube L/R, so the row warns about it.
++    constexpr SDL_GamepadAxis triggers[] = {SDL_GAMEPAD_AXIS_LEFT_TRIGGER,
++                                            SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
++    for (std::size_t t = 0; t < std::size(triggers) && t < z_detect.rest_triggers.size(); ++t)
++    {
++      if (z_detect.rest_triggers[t] || SDL_GetGamepadAxis(pad, triggers[t]) < 16000)
++        continue;
++      std::string device = z_detect.device;
++      stop_z_detect();
++      apply_z(std::move(device), t == 0 ? "Trigger L" : "Trigger R");
++      return;
++    }
 +    if (elapsed > 10000)
 +    {
 +      stop_z_detect();
@@ -4561,7 +4579,7 @@ index 7699c3d..2463c7d 100644
    const auto ensure_controller = [&]
    {
      if (moderngekko::frontend::ControllerConfigExists(user_directory))
-@@ -681,23 +1286,43 @@ int main(int argc, char** argv)
+@@ -681,23 +1301,43 @@ int main(int argc, char** argv)
                         " has no configured controller device";
          return false;
        }
@@ -4612,7 +4630,7 @@ index 7699c3d..2463c7d 100644
      if (!controller_profile_exists)
      {
        if (controller_index < 0 && !controllers.empty())
-@@ -710,6 +1335,11 @@ int main(int argc, char** argv)
+@@ -710,6 +1350,11 @@ int main(int argc, char** argv)
        else
          controller_status = "No SDL gamepad detected";
      }
@@ -4624,7 +4642,7 @@ index 7699c3d..2463c7d 100644
      else
      {
        controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
-@@ -774,14 +1404,18 @@ int main(int argc, char** argv)
+@@ -774,14 +1419,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -4646,7 +4664,7 @@ index 7699c3d..2463c7d 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1454,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1469,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -4656,7 +4674,7 @@ index 7699c3d..2463c7d 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1463,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1478,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -4719,7 +4737,7 @@ index 7699c3d..2463c7d 100644
      }
      else
      {
-@@ -891,6 +1470,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1485,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -4727,7 +4745,7 @@ index 7699c3d..2463c7d 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1520,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1535,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -4762,7 +4780,7 @@ index 7699c3d..2463c7d 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1579,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1594,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -4798,7 +4816,7 @@ index 7699c3d..2463c7d 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -993,18 +1620,17 @@ int main(int argc, char** argv)
+@@ -993,18 +1635,17 @@ int main(int argc, char** argv)
          const bool selected = controller_index == static_cast<int>(i);
          if (ImGui::Selectable(controllers[i].label.c_str(), selected))
          {
@@ -4821,7 +4839,7 @@ index 7699c3d..2463c7d 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,67 +1638,630 @@ int main(int argc, char** argv)
+@@ -1012,67 +1653,639 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -4863,7 +4881,9 @@ index 7699c3d..2463c7d 100644
 +        controller_index >= 0 && !controllers[controller_index].wheel &&
 +        controllers[controller_index].device != moderngekko::frontend::KEYBOARD_DEVICE;
 +    if (gamepad_selected)
-+    {
+     {
+-      ImGui::SetNextItemWidth(180 * scale);
+-      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
 +      const std::string& device = controllers[controller_index].device;
 +      if (z_detect.gamepad && z_detect.device != device)
 +        stop_z_detect();
@@ -4898,15 +4918,22 @@ index 7699c3d..2463c7d 100644
 +                                                               "Press Z on your controller...");
 +        poll_z_detect();
 +      }
++      else if (custom_z && config.z_button.starts_with("Trigger "))
++      {
++        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, .78f, .25f, 1));
++        ImGui::TextWrapped("Warning: this trigger is also GameCube %s, so every %s press "
++                           "will fire Z (spin attack) too.",
++                           config.z_button == "Trigger L" ? "L" : "R",
++                           config.z_button == "Trigger L" ? "L" : "R");
++        ImGui::PopStyleColor();
++      }
 +      else
 +      {
 +        ImGui::TextDisabled("For adapters (e.g. 8BitDo GBros) where Z does nothing.");
 +      }
 +    }
 +    else if (z_detect.gamepad)
-     {
--      ImGui::SetNextItemWidth(180 * scale);
--      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
++    {
 +      stop_z_detect();
      }
      ImGui::Spacing();
@@ -5497,7 +5524,7 @@ index 7699c3d..2463c7d 100644
      }
  
      {
-@@ -1090,16 +2279,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +2303,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -5569,7 +5596,7 @@ index 7699c3d..2463c7d 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +2362,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +2386,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -5580,7 +5607,7 @@ index 7699c3d..2463c7d 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1165,6 +2413,13 @@ int main(int argc, char** argv)
+@@ -1165,6 +2437,13 @@ int main(int argc, char** argv)
        std::filesystem::create_directories(log_path.parent_path(), log_error);
        SDL_IOStream* log_stream =
            log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
@@ -5594,7 +5621,7 @@ index 7699c3d..2463c7d 100644
        SDL_Process* process = nullptr;
        std::string process_error;
        if (log_stream)
-@@ -1201,9 +2456,35 @@ int main(int argc, char** argv)
+@@ -1201,9 +2480,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -5632,7 +5659,7 @@ index 7699c3d..2463c7d 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +2520,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2544,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -5655,7 +5682,7 @@ index 7699c3d..2463c7d 100644
            }
            else
            {
-@@ -1266,8 +2550,24 @@ int main(int argc, char** argv)
+@@ -1266,8 +2574,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
