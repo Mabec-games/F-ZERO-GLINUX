@@ -30,6 +30,7 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Nine resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K and 4K Ultrawide (5120×2160).
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
 - **Boost on X:** optional X/Y swap for modern four-button gamepads.
+- **Z button Detect:** for adapters such as the 8BitDo GBros, where Z does nothing or a full R press fires the spin attack. Click Detect under Controller and press Z on your pad.
 - **Steering wheels (experimental, untested):** an opt-in Controller setting lists your wheel, detects its steering, gas and brake axes, and uses Dolphin's GameCube steering wheel mode with force feedback in local play. Wheel drivers come from your system.
 - **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. The experimental local code "21:9 Ultrawide 3D & HUD" widens the 3D view and fixes the stretched HUD: tested in-game on PAL (`GFZP01`), briefly checked on NTSC-U (`GFZE01`).
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
@@ -139,21 +140,21 @@ installer or extra runtime needed. Saves are stored in `%LOCALAPPDATA%\fzero-gli
 
 ## Start playing
 
-The filenames below are those of the **v0.9.3** release. When building locally,
+The filenames below are those of the **v0.9.4** release. When building locally,
 find them in `dist/`. See [Releases](https://github.com/Mabec-games/F-ZERO-GLINUX/releases)
 for any published downloads; source publication does not automatically publish binaries.
 
 ### AppImage
 
 ```bash
-chmod +x F-ZERO-GLINUX-0.9.3-glibc2.35-x86_64.AppImage
-./F-ZERO-GLINUX-0.9.3-glibc2.35-x86_64.AppImage
+chmod +x F-ZERO-GLINUX-0.9.4-glibc2.35-x86_64.AppImage
+./F-ZERO-GLINUX-0.9.4-glibc2.35-x86_64.AppImage
 ```
 
 If FUSE is unavailable, run:
 
 ```bash
-./F-ZERO-GLINUX-0.9.3-glibc2.35-x86_64.AppImage --appimage-extract-and-run
+./F-ZERO-GLINUX-0.9.4-glibc2.35-x86_64.AppImage --appimage-extract-and-run
 ```
 
 The release AppImage is smoke-tested on Ubuntu 22.04 and 24.04, Debian 12 and
@@ -179,7 +180,7 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 
 ### Windows
 
-1. Download `F-ZERO-GLINUX-0.9-windows-x64.zip` and unpack it to any folder.
+1. Download `F-ZERO-GLINUX-0.9.4-windows-x64.zip` and unpack it to any folder.
 2. Run `F-ZERO GLINUX.exe`. If SmartScreen warns about an unknown publisher,
    choose **More info → Run anyway**; the preview is not code-signed.
 

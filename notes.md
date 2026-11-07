@@ -1,6 +1,15 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-11-01 (v0.9.3 + issue #15 Z-button work).
+Updated: 2026-11-07 (v0.9.4).
+
+
+## Latest update — Release 0.9.4: Z button Detect, screen stays awake, PAL unlock fix, 2026-11-07
+
+- **Z button Detect (issue #15):** launcher CONTROLLER row for adapters such as the 8BitDo GBros (XInput mode sends Z as Back, R's click as the right bumper). Detect takes buttons, raw buttons and LT/RT (with an amber warning that the trigger is also GameCube L/R); the binding replaces the default Z for that pad only. Tested on screen with an 8BitDo Ultimate 2C. Details in the "Issue #15" section at the end.
+- **Screen stays awake on X11 (issue #17):** controller-only play no longer lets the screen blank (`XResetScreenSaver`). Wayland sessions may still blank; not handled yet.
+- **PAL "Unlock Everything" save addresses** corrected (tickets and later fields moved by +0x18).
+- **SaveConfig** no longer leaves a cut-off config.ini when a setting is rejected.
+- No new app icon yet (still pending, see "TODO: new launcher/app icon").
 
 
 ## Latest update — Release 0.9.3: Gecko fix, 21:9 ultrawide, experimental steering wheel, 2026-10-30
