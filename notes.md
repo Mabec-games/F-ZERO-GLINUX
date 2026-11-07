@@ -1,6 +1,6 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-10-30 (v0.9.3).
+Updated: 2026-11-01 (v0.9.3 + issue #15 Z-button work).
 
 
 ## Latest update — Release 0.9.3: Gecko fix, 21:9 ultrawide, experimental steering wheel, 2026-10-30
@@ -1272,3 +1272,19 @@ text; ignore it if fetched again.
   - Flatpak: `scripts/prepare-flatpak.py` copies the svg (`Icon=io.github.mabecgames.FZeroGLinux`).
   - Windows: `scripts/make-windows-icon.py` renders the svg to `packaging/windows/fzero-glinux.ico` (embedded via `MODERNGEKKO_WINDOWS_ICON` for launcher + runner).
 - The logo is ~4:1, icons must be square: pad onto a transparent square canvas (logo centred, full width) and render 16–256 px sizes; check that it stays readable at 16/32 px.
+
+## Issue #15: GameCube Z ignored through 8BitDo GBros adapter (2026-11-01, waiting on reporter)
+- Report (hmaciejewicz): original GC pad via 8BitDo GBros. Analog L/R fine, Z does nothing, fully clicking R fires the spin attack. Same in Piconet; works in Dolphin.
+- Cause: `GenerateControllerConfig` hardcoded `Buttons/Z = \`Shoulder R\` | \`Shoulder L\` | Back` for every SDL gamepad. The GBros sends R's digital click as the right bumper (so R = Z) and real Z as some other button. SDL has no GBros mapping in the vendored source, so which button is unknown. Piconet shares the upstream ModernGekko generator.
+- Fix (uncommitted, in `lib/ModernGekko` + regenerated `patches/moderngekko-glinux-launcher.patch`, `git apply --check` OK on a clean worktree):
+  - Launcher: "Z button: ... [Detect] [Reset]" row for a selected gamepad (not wheel/keyboard). Samples held buttons after 250 ms, takes the first new press within 10 s; SDL-named buttons use Dolphin's names (`GamepadButtonName`), unmapped raw buttons become `Button N`; D-pad ignored.
+  - `config.ini [Input]`: `z_button_device=`, `z_button=` (validated by `ValidZButton`). Applies only to the port whose device matches, and **replaces** the default Z (otherwise R-click keeps spinning).
+  - Tests: `frontend_config_test.cpp` codes 66-71. Both frontend_config tests pass, launcher builds without warnings. **Not seen on screen yet.**
+- Code-review fixes (2026-11-07, uncommitted, tests 72-75 added, both frontend_config tests pass, launcher builds clean, patch regenerated + `git apply --check` OK):
+  - `SaveConfig` runs all checks (controllers, wheel_device, Z) before truncating config.ini; a rejected save used to leave a cut-off file (bug predated Z work).
+  - `ValidZButton` rejects A/B/X/Y, Start, Guide (a stray press during Detect bound Z to them).
+  - Detect/Reset use new `SetControllerZButton`: rewrites only the matching pad's `Buttons/Z` line in the existing GCPadNew.ini (custom + multi-pad profiles kept); regenerates only if no section uses that device. One config save instead of three.
+  - Collapsing CONTROLLER now stops Z and wheel detection (polling ran only while open, so a later press was taken).
+  - Left open: Z that SDL maps to a trigger axis (wait for reporter), one Z binding per launcher tied to SDL index, "Button 21-25" name clash, Wayland idle for #17 (X11 reset only).
+- Player-facing reply posted by the user (no Dolphin needed; asks for: what Detect shows, GBros mode XInput/Switch, controller name in the launcher list).
+- Next: when the reporter answers, consider a built-in GBros default (match device name); look at the Z row in the launcher; commit + push to `dev`; ship in next build (or a test AppImage if asked).

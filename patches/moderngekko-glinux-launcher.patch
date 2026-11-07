@@ -522,7 +522,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..a0977f8 100644
+index 6bb9e0e..5529ae5 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -663,7 +663,7 @@ index 6bb9e0e..a0977f8 100644
        !generated.contains("Main Stick/Up = `Left Y+`\n") ||
        !generated.contains("C-Stick/Up = `Right Y+`\n") ||
        !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
-@@ -114,6 +215,31 @@ int main() {
+@@ -114,6 +215,100 @@ int main() {
  #endif
  
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
@@ -692,10 +692,79 @@ index 6bb9e0e..a0977f8 100644
 +  if (!moderngekko::frontend::SaveConfig(directory, boosted_config, &error) ||
 +      !moderngekko::frontend::GenerateControllerConfig(directory, netplay_config.controllers, &error) ||
 +      read_profile() != expected) return 64;
++  // A detected Z replaces the default only on the pad it was detected on.
++  {
++    using moderngekko::frontend::ValidZButton;
++    if (!ValidZButton("Misc 1") || !ValidZButton("Button 11") || !ValidZButton("Paddle 1") ||
++        ValidZButton("Pad N") || ValidZButton("Button S") || ValidZButton("Start") ||
++        ValidZButton("Guide") || ValidZButton("Button") || ValidZButton("Button 1234") ||
++        ValidZButton("Trigger R") || ValidZButton("Misc 1`\nButtons/A = x"))
++      return 66;
++    if (moderngekko::frontend::GamepadButtonName(15) != "Misc 1" ||
++        moderngekko::frontend::GamepadButtonName(22) != "Button 22")
++      return 67;
++    auto z_config = boosted_config;
++    z_config.z_button_device = "SDL/1/Second Controller";
++    z_config.z_button = "Misc 1";
++    if (!moderngekko::frontend::SaveConfig(directory, z_config, &error) ||
++        moderngekko::frontend::LoadConfig(directory, false).z_button != "Misc 1" ||
++        !moderngekko::frontend::GenerateControllerConfig(directory, netplay_config.controllers, &error))
++      return 68;
++    const auto z_profile = read_profile();
++    const auto pad2 = z_profile.find("[GCPad2]");
++    if (pad2 == std::string::npos ||
++        z_profile.find("Buttons/Z = `Shoulder R` | `Shoulder L` | Back\n") > pad2 ||
++        z_profile.find("Buttons/Z = `Misc 1`\n", pad2) == std::string::npos ||
++        z_profile.find("Shoulder R", pad2) != std::string::npos)
++      return 69;
++    z_config.z_button = "Pad N";
++    const auto read_config = [&] {
++      std::ifstream input(directory / "config.ini");
++      return std::string(std::istreambuf_iterator<char>(input), {});
++    };
++    const std::string config_before = read_config();
++    if (moderngekko::frontend::SaveConfig(directory, z_config, &error)) return 70;
++    // A rejected save must leave the previous config.ini untouched.
++    if (read_config() != config_before) return 72;
++    if (!moderngekko::frontend::SaveConfig(directory, boosted_config, &error) ||
++        !moderngekko::frontend::GenerateControllerConfig(directory, netplay_config.controllers, &error) ||
++        read_profile() != expected) return 71;
++    // Detect/Reset edit only the matching pad's Z line in an existing profile.
++    const auto write_profile = [&](const std::string &text) {
++      std::ofstream output(directory / "Config" / CONTROLLER_CONFIG_NAME, std::ios::trunc);
++      output << text;
++    };
++    write_profile("[GCPad1]\nDevice = SDL/0/Pad A\nButtons/A = Custom\nButtons/Z = `Back`\n"
++                  "[GCPad2]\nDevice = SDL/1/Pad B\nButtons/Z = `Back`\nButtons/B = Mine\n"
++                  "[GCPad3]\nDevice = SDL/2/Pad C\nButtons/B = NoZ\n");
++    bool found = false;
++    if (!moderngekko::frontend::SetControllerZButton(directory, "SDL/1/Pad B", "Misc 1", &found,
++                                                     &error) ||
++        !found ||
++        read_profile() !=
++            "[GCPad1]\nDevice = SDL/0/Pad A\nButtons/A = Custom\nButtons/Z = `Back`\n"
++            "[GCPad2]\nDevice = SDL/1/Pad B\nButtons/Z = `Misc 1`\nButtons/B = Mine\n"
++            "[GCPad3]\nDevice = SDL/2/Pad C\nButtons/B = NoZ\n")
++      return 73;
++    if (!moderngekko::frontend::SetControllerZButton(directory, "SDL/2/Pad C", "", &found,
++                                                     &error) ||
++        !found ||
++        !read_profile().ends_with("[GCPad3]\nDevice = SDL/2/Pad C\n"
++                                  "Buttons/Z = `Shoulder R` | `Shoulder L` | Back\n"
++                                  "Buttons/B = NoZ\n"))
++      return 74;
++    const std::string before_missing = read_profile();
++    if (!moderngekko::frontend::SetControllerZButton(directory, "SDL/7/Gone", "Misc 1", &found,
++                                                     &error) ||
++        found || read_profile() != before_missing ||
++        moderngekko::frontend::SetControllerZButton(directory, "SDL/1/Pad B", "Start", &found,
++                                                    &error))
++      return 75;
++  }
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +264,371 @@ int main() {
+@@ -138,6 +333,371 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -1124,7 +1193,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..a1fe103 100644
+index 03740d4..a3ac79c 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1776,7 +1845,7 @@ index 03740d4..a1fe103 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +717,47 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +717,54 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -1814,6 +1883,13 @@ index 03740d4..a1fe103 100644
 +        return {.error = key + " must be true or false"};
 +    } else if (key == "wheel_device")
 +      config.wheel_device = raw_value;
++    else if (key == "z_button_device")
++      config.z_button_device = raw_value;
++    else if (key == "z_button") {
++      // An unreadable binding falls back to the default Z instead of blocking launch.
++      if (ValidZButton(raw_value))
++        config.z_button = raw_value;
++    }
 +    else if (key == "wheel_steering" || key == "wheel_gas" ||
 +             key == "wheel_brake") {
 +      // An unreadable binding keeps the default instead of blocking launch.
@@ -1824,7 +1900,7 @@ index 03740d4..a1fe103 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +803,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +810,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -1843,7 +1919,7 @@ index 03740d4..a1fe103 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +836,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +843,24 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -1871,7 +1947,34 @@ index 03740d4..a1fe103 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -249,14 +882,39 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -235,6 +875,26 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+       return false;
+     }
+   }
++  // Every check happens before config.ini is truncated, so a rejected save
++  // leaves the previous file intact.
++  for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
++    if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
++      if (error)
++        *error = "controller device cannot contain a newline";
++      return false;
++    }
++  }
++  if (config.wheel_device.find_first_of("\r\n") != std::string::npos) {
++    if (error)
++      *error = "wheel device cannot contain a newline";
++    return false;
++  }
++  if (config.z_button_device.find_first_of("\r\n") != std::string::npos ||
++      (!config.z_button.empty() && !ValidZButton(config.z_button))) {
++    if (error)
++      *error = "invalid Z button binding";
++    return false;
++  }
+   std::error_code ec;
+   fs::create_directories(user_directory, ec);
+   if (ec) {
+@@ -249,28 +909,58 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -1910,24 +2013,24 @@ index 03740d4..a1fe103 100644
 +  }
 +  file << '\n'
         << "[Input]\n";
-   for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
-     if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -266,11 +924,25 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
-     }
+-  for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
+-    if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
+-      if (error)
+-        *error = "controller device cannot contain a newline";
+-      return false;
+-    }
++  for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i)
      file << "controller" << i + 1 << '=' << config.controllers[i] << '\n';
-   }
-+  if (config.wheel_device.find_first_of("\r\n") != std::string::npos) {
-+    if (error)
-+      *error = "wheel device cannot contain a newline";
-+    return false;
-+  }
+-  }
 +  file << "steering_wheel=" << (config.steering_wheel ? "true" : "false") << '\n'
 +       << "wheel_device=" << config.wheel_device << '\n'
 +       << "wheel_steering=" << config.wheel_steering << '\n'
 +       << "wheel_gas=" << config.wheel_gas << '\n'
 +       << "wheel_brake=" << config.wheel_brake << '\n'
 +       << "wheel_force_reverse=" << (config.wheel_force_reverse ? "true" : "false")
-+       << '\n';
++       << '\n'
++       << "z_button_device=" << config.z_button_device << '\n'
++       << "z_button=" << config.z_button << '\n';
    file << "[Netplay]\n"
         << "nickname=" << config.netplay_nickname << '\n'
         << "address=" << config.netplay_address << '\n'
@@ -1938,10 +2041,99 @@ index 03740d4..a1fe103 100644
    return true;
  }
  
-@@ -336,6 +1008,62 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +1026,151 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
++namespace {
++constexpr std::string_view DEFAULT_GAMEPAD_Z = "`Shoulder R` | `Shoulder L` | Back";
++} // namespace
++
++bool SetControllerZButton(const fs::path &user_directory, std::string_view device,
++                          std::string_view z_button, bool *found, std::string *error) {
++  *found = false;
++  if (!z_button.empty() && !ValidZButton(z_button)) {
++    if (error) *error = "invalid Z button binding";
++    return false;
++  }
++  const fs::path path = ControllerConfigPath(user_directory);
++  std::ifstream input(path);
++  if (!input)
++    return true;
++  std::vector<std::string> lines;
++  for (std::string line; std::getline(input, line);)
++    lines.push_back(std::move(line));
++  const bool input_bad = input.bad();
++  input.close();
++  if (input_bad) {
++    if (error) *error = "can't read " + path.string();
++    return false;
++  }
++  const auto key_of = [](const std::string &line, std::string *value) {
++    const std::string trimmed = Trim(line);
++    const auto equals = trimmed.find('=');
++    if (equals == std::string::npos)
++      return std::string{};
++    if (value)
++      *value = Trim(trimmed.substr(equals + 1));
++    return Trim(trimmed.substr(0, equals));
++  };
++  const std::string z_line =
++      "Buttons/Z = " + (z_button.empty() ? std::string(DEFAULT_GAMEPAD_Z)
++                                         : "`" + std::string(z_button) + "`");
++  const std::string_view prefix = ControllerSectionPrefix();
++  std::vector<std::string> result;
++  for (std::size_t begin = 0; begin < lines.size();) {
++    // [begin, end) is one section (or the lines before the first one).
++    std::size_t end = begin + 1;
++    while (end < lines.size() && !Trim(lines[end]).starts_with('['))
++      ++end;
++    const std::string header = Trim(lines[begin]);
++    bool matches = false;
++    if (header.starts_with(prefix) && header.ends_with(']')) {
++      for (std::size_t i = begin + 1; i < end; ++i) {
++        std::string value;
++        if (key_of(lines[i], &value) == "Device" && value == device)
++          matches = true;
++      }
++    }
++    if (!matches) {
++      result.insert(result.end(), lines.begin() + begin, lines.begin() + end);
++      begin = end;
++      continue;
++    }
++    *found = true;
++    // Drop the old Z lines and write the new one right after Device.
++    for (std::size_t i = begin; i < end; ++i) {
++      const std::string key = i > begin ? key_of(lines[i], nullptr) : std::string{};
++      if (key == "Buttons/Z")
++        continue;
++      result.push_back(lines[i]);
++      if (key == "Device")
++        result.push_back(z_line);
++    }
++    begin = end;
++  }
++  if (!*found)
++    return true;
++  const auto temporary = path.string() + ".glinux-tmp";
++  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
++  for (const std::string &line : result)
++    output << line << '\n';
++  output.close();
++  if (!output) {
++    if (error) *error = "can't write " + temporary;
++    return false;
++  }
++  std::error_code ec;
++  fs::rename(temporary, path, ec);
++  if (ec) {
++    if (error) *error = "can't replace " + path.string() + ": " + ec.message();
++    return false;
++  }
++  return true;
++}
++
 +bool SetBoostLayout(const fs::path &user_directory, bool enabled, std::string *error) {
 +  const auto path = user_directory / "Config" / "GCPadNew.ini";
 +  std::ifstream input(path);
@@ -2001,7 +2193,13 @@ index 03740d4..a1fe103 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -372,27 +1100,71 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -367,32 +1202,83 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+       *message = "can't write " + destination.string();
+     return false;
+   }
++  [[maybe_unused]] const ConfigResult settings = LoadConfig(user_directory, false);
+   for (std::size_t i = 0; i < 4; ++i) {
+ #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
      output << "[GCPad" << i + 1 << "]\n";
      if (i >= controllers.size())
        continue;
@@ -2019,7 +2217,7 @@ index 03740d4..a1fe103 100644
 +      output << "Device = " << controllers[i] << '\n'
 +             << "Buttons/A = `X`\n"
 +                "Buttons/B = `Z`\n"
-+             << (LoadConfig(user_directory, false).boost_on_x
++             << (settings.boost_on_x
 +                     ? "Buttons/X = `S`\nButtons/Y = `C`\n"
 +                     : "Buttons/X = `C`\nButtons/Y = `S`\n")
 +             << "Buttons/Z = `D`\n"
@@ -2049,12 +2247,19 @@ index 03740d4..a1fe103 100644
 -              "Buttons/X = `Button X`\n"
 -              "Buttons/Y = `Button Y`\n"
 -              "Buttons/Z = `Shoulder R`\n"
-+           << (LoadConfig(user_directory, false).boost_on_x
+-              "Buttons/Start = Start\n"
++           << (settings.boost_on_x
 +                   ? "Buttons/X = `Button Y`\nButtons/Y = `Button X`\n"
 +                   : "Buttons/X = `Button X`\nButtons/Y = `Button Y`\n")
-+           <<
-+              "Buttons/Z = `Shoulder R` | `Shoulder L` | Back\n"
-               "Buttons/Start = Start\n"
++           // Adapters such as the 8BitDo GBros report GameCube Z as some
++           // other button and R's digital click as the right bumper, so a
++           // detected Z replaces the default rather than adding to it.
++           << "Buttons/Z = "
++           << (!settings.z_button.empty() && settings.z_button_device == controllers[i]
++                   ? "`" + settings.z_button + "`"
++                   : std::string(DEFAULT_GAMEPAD_Z))
++           << "\n"
++           << "Buttons/Start = Start\n"
                "Main Stick/Up = `Left Y+`\n"
                "Main Stick/Down = `Left Y-`\n"
                "Main Stick/Left = `Left X-`\n"
@@ -2076,10 +2281,45 @@ index 03740d4..a1fe103 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -477,6 +1249,135 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -477,6 +1363,170 @@ bool GenerateControllerConfig(const fs::path &user_directory,
        user_directory, std::span<const std::string>(&value, 1), message);
  }
  
++namespace {
++// Dolphin's SDLGamepad.h s_sdl_button_names, indexed by SDL_GamepadButton.
++constexpr std::string_view GAMEPAD_BUTTON_NAMES[] = {
++    "Button S",   "Button E",   "Button W", "Button N", "Back",     "Guide",
++    "Start",      "Thumb L",    "Thumb R",  "Shoulder L", "Shoulder R",
++    "Pad N",      "Pad S",      "Pad W",    "Pad E",    "Misc 1",   "Paddle 1",
++    "Paddle 2",   "Paddle 3",   "Paddle 4", "Touchpad"};
++bool IsDpadName(std::string_view value) { return value.starts_with("Pad "); }
++} // namespace
++
++std::string GamepadButtonName(int sdl_button) {
++  if (sdl_button < 0)
++    return {};
++  if (static_cast<std::size_t>(sdl_button) < std::size(GAMEPAD_BUTTON_NAMES))
++    return std::string(GAMEPAD_BUTTON_NAMES[sdl_button]);
++  // Dolphin's fallback for SDL buttons past its table.
++  return "Button " + std::to_string(sdl_button);
++}
++
++bool ValidZButton(std::string_view value) {
++  // The D-pad is left out: the game needs it.
++  // A, B, X, Y, Start and Guide are left out too: a stray press while
++  // detecting would otherwise put Z on a button the game already uses.
++  if (std::ranges::find(GAMEPAD_BUTTON_NAMES, value) != std::end(GAMEPAD_BUTTON_NAMES))
++    return !IsDpadName(value) && !value.starts_with("Button ") && value != "Start" &&
++           value != "Guide";
++  // "Button <n>": raw joystick buttons SDL's mapping leaves unnamed.
++  constexpr std::string_view prefix = "Button ";
++  if (!value.starts_with(prefix) || value.size() < prefix.size() + 1 ||
++      value.size() > prefix.size() + 3)
++    return false;
++  return std::ranges::all_of(value.substr(prefix.size()),
++                             [](char c) { return c >= '0' && c <= '9'; });
++}
++
 +bool ValidWheelAxis(std::string_view value) {
 +  // "Full Axis" spans the whole axis, for pedals that rest at one end.
 +  if (value.starts_with("Full "))
@@ -2212,7 +2452,7 @@ index 03740d4..a1fe103 100644
  bool EnsureControllerConfig(const fs::path &user_directory,
                              std::span<const std::string> controllers,
                              std::string *message) {
-@@ -494,4 +1395,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1544,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }
@@ -2621,7 +2861,7 @@ index 03740d4..a1fe103 100644
 +}
  } // namespace moderngekko::frontend
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..06eed6c 100644
+index 3b18d05..3d4dcb0 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
 @@ -8,9 +8,22 @@
@@ -2647,7 +2887,7 @@ index 3b18d05..06eed6c 100644
  };
  
  struct GraphicsBackendOption {
-@@ -18,14 +31,53 @@ struct GraphicsBackendOption {
+@@ -18,14 +31,57 @@ struct GraphicsBackendOption {
    const char *value;
  };
  
@@ -2695,6 +2935,10 @@ index 3b18d05..06eed6c 100644
 +  std::string wheel_gas = "Axis 2-";
 +  std::string wheel_brake = "Axis 3-";
 +  bool wheel_force_reverse = false;
++  // Optional Z binding for one gamepad, for adapters whose Z isn't a bumper or
++  // Back (e.g. 8BitDo GBros). Empty keeps the default Z binding.
++  std::string z_button_device;
++  std::string z_button;
 +  // Local-only Gecko code IDs; automatically disabled during online NetPlay.
 +  std::vector<std::string> local_gecko_codes;
 +  // Empty preserves the existing Dolphin setting.
@@ -2702,7 +2946,7 @@ index 3b18d05..06eed6c 100644
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -35,8 +87,15 @@ struct ConfigResult {
+@@ -35,8 +91,15 @@ struct ConfigResult {
    explicit operator bool() const { return error.empty(); }
  };
  
@@ -2718,7 +2962,7 @@ index 3b18d05..06eed6c 100644
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                          bool create_if_missing);
  bool SaveConfig(const std::filesystem::path &user_directory,
-@@ -48,6 +107,8 @@ std::string
+@@ -48,6 +111,8 @@ std::string
  ReadConfiguredController(const std::filesystem::path &user_directory);
  std::vector<std::string>
  ReadConfiguredControllers(const std::filesystem::path &user_directory);
@@ -2727,13 +2971,25 @@ index 3b18d05..06eed6c 100644
  bool ControllerConfigExists(const std::filesystem::path &user_directory);
  bool GenerateControllerConfig(const std::filesystem::path &user_directory,
                                std::span<const std::string> controllers,
-@@ -60,4 +121,23 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+@@ -60,4 +125,35 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                              std::string *message);
  bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                              std::string_view controller, std::string *message);
 +// "Axis <n>+" or "Axis <n>-" (optionally "Full Axis ..."), the names Dolphin
 +// gives raw SDL joystick axes. Steering must be a plain "Axis" name.
 +bool ValidWheelAxis(std::string_view value);
++// A Dolphin SDL gamepad button name ("Misc 1", "Paddle 2", "Button 11", ...)
++// that can be bound to GameCube Z.
++bool ValidZButton(std::string_view value);
++// Dolphin's input name for an SDL_GamepadButton value.
++std::string GamepadButtonName(int sdl_button);
++// Rewrites only the Buttons/Z line of each [GCPadN] section whose Device is
++// `device` in the existing profile, keeping every other binding. An empty
++// `z_button` restores the default Z. Sets *found to false (and returns true)
++// when no section uses that device, so the caller can generate a profile.
++bool SetControllerZButton(const std::filesystem::path &user_directory,
++                          std::string_view device, std::string_view z_button,
++                          bool *found, std::string *error);
 +// Port 1 wheel profile from the wheel_* bindings in config; ports 2-4 empty.
 +bool GenerateWheelConfig(const std::filesystem::path &user_directory,
 +                         const ConfigResult &config, std::string *message);
@@ -3336,7 +3592,7 @@ index 0000000..1714c24
 +  </application>
 +</assembly>
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..9ad4eaf 100644
+index 7699c3d..2463c7d 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -1,14 +1,22 @@
@@ -4134,7 +4390,7 @@ index 7699c3d..9ad4eaf 100644
      {
        std::lock_guard lock(dialog.mutex);
        dialog.error = std::move(error);
-@@ -668,6 +1109,72 @@ int main(int argc, char** argv)
+@@ -668,6 +1109,170 @@ int main(int argc, char** argv)
      controller_status = std::move(message);
      return true;
    };
@@ -4204,10 +4460,108 @@ index 7699c3d..9ad4eaf 100644
 +      controller_status = "No wheel or pedal movement detected";
 +    }
 +  };
++  // Z detection for adapters (e.g. 8BitDo GBros) whose GameCube Z isn't a
++  // bumper or Back: the first newly pressed button becomes Z for that pad.
++  struct ZDetect
++  {
++    SDL_Gamepad* gamepad = nullptr;
++    std::string device;
++    std::vector<bool> rest_buttons;
++    std::vector<bool> rest_raw;
++    std::vector<bool> raw_mapped;
++    Uint64 started = 0;
++  } z_detect;
++  const auto stop_z_detect = [&]
++  {
++    if (z_detect.gamepad)
++      SDL_CloseGamepad(z_detect.gamepad);
++    z_detect = {};
++  };
++  const auto apply_z = [&](std::string device, std::string button)
++  {
++    const auto previous = config;
++    config.z_button_device = std::move(device);
++    config.z_button = std::move(button);
++    std::string error;
++    bool found = false;
++    // Only the Z line of this pad changes, so custom and multi-pad profiles
++    // keep their other bindings.
++    const bool saved = moderngekko::frontend::SaveConfig(user_directory, config, &error);
++    if (saved && moderngekko::frontend::SetControllerZButton(
++                     user_directory, config.z_button_device, config.z_button, &found, &error))
++    {
++      // No profile uses this pad yet: generate one, as selecting it would.
++      if (found || (controller_index >= 0 && select_controller(controller_index)))
++        controller_status = config.z_button.empty() ? "Z button reset to the default" :
++                                                      "Z button set to " + config.z_button;
++      return;
++    }
++    if (saved)
++      moderngekko::frontend::SaveConfig(user_directory, previous, nullptr);
++    config = previous;
++    std::lock_guard lock(dialog.mutex);
++    dialog.error = std::move(error);
++  };
++  const auto poll_z_detect = [&]
++  {
++    SDL_Gamepad* const pad = z_detect.gamepad;
++    SDL_Joystick* const joystick = SDL_GetGamepadJoystick(pad);
++    const int raw_count = std::max(SDL_GetNumJoystickButtons(joystick), 0);
++    const Uint64 elapsed = SDL_GetTicks() - z_detect.started;
++    // Sample held buttons a moment after opening, so the click on Detect
++    // (or a button stuck down) is not taken as Z.
++    if (z_detect.rest_buttons.empty())
++    {
++      if (elapsed < 250)
++        return;
++      for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b)
++        z_detect.rest_buttons.push_back(SDL_GetGamepadButton(pad, SDL_GamepadButton(b)));
++      z_detect.raw_mapped.assign(raw_count, false);
++      int binding_count = 0;
++      if (SDL_GamepadBinding** bindings = SDL_GetGamepadBindings(pad, &binding_count))
++      {
++        for (int i = 0; i < binding_count; ++i)
++          if (bindings[i]->input_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
++              bindings[i]->input.button >= 0 && bindings[i]->input.button < raw_count)
++            z_detect.raw_mapped[bindings[i]->input.button] = true;
++        SDL_free(bindings);
++      }
++      for (int i = 0; i < raw_count; ++i)
++        z_detect.rest_raw.push_back(SDL_GetJoystickButton(joystick, i));
++      return;
++    }
++    for (int b = 0; b < static_cast<int>(z_detect.rest_buttons.size()); ++b)
++    {
++      if (z_detect.rest_buttons[b] || !SDL_GetGamepadButton(pad, SDL_GamepadButton(b)))
++        continue;
++      const std::string name = moderngekko::frontend::GamepadButtonName(b);
++      if (!moderngekko::frontend::ValidZButton(name))
++        continue;  // D-pad
++      std::string device = z_detect.device;
++      stop_z_detect();
++      apply_z(std::move(device), name);
++      return;
++    }
++    // Buttons SDL's mapping doesn't name show up in Dolphin as "Button <n>".
++    for (int i = 0; i < raw_count && i < static_cast<int>(z_detect.rest_raw.size()); ++i)
++    {
++      if (z_detect.raw_mapped[i] || z_detect.rest_raw[i] || !SDL_GetJoystickButton(joystick, i))
++        continue;
++      std::string device = z_detect.device;
++      stop_z_detect();
++      apply_z(std::move(device), "Button " + std::to_string(i));
++      return;
++    }
++    if (elapsed > 10000)
++    {
++      stop_z_detect();
++      controller_status = "No button press detected; Z is unchanged";
++    }
++  };
    const auto ensure_controller = [&]
    {
      if (moderngekko::frontend::ControllerConfigExists(user_directory))
-@@ -681,23 +1188,43 @@ int main(int argc, char** argv)
+@@ -681,23 +1286,43 @@ int main(int argc, char** argv)
                         " has no configured controller device";
          return false;
        }
@@ -4258,7 +4612,7 @@ index 7699c3d..9ad4eaf 100644
      if (!controller_profile_exists)
      {
        if (controller_index < 0 && !controllers.empty())
-@@ -710,6 +1237,11 @@ int main(int argc, char** argv)
+@@ -710,6 +1335,11 @@ int main(int argc, char** argv)
        else
          controller_status = "No SDL gamepad detected";
      }
@@ -4270,7 +4624,7 @@ index 7699c3d..9ad4eaf 100644
      else
      {
        controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
-@@ -774,14 +1306,18 @@ int main(int argc, char** argv)
+@@ -774,14 +1404,18 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -4292,7 +4646,7 @@ index 7699c3d..9ad4eaf 100644
      if (current_metadata)
      {
        ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-@@ -820,7 +1356,8 @@ int main(int argc, char** argv)
+@@ -820,7 +1454,8 @@ int main(int argc, char** argv)
          ImGui::TextDisabled("Solo play only.");
          ImGui::Spacing();
        }
@@ -4302,7 +4656,7 @@ index 7699c3d..9ad4eaf 100644
        {
          if (ensure_controller())
          {
-@@ -828,62 +1365,6 @@ int main(int argc, char** argv)
+@@ -828,62 +1463,6 @@ int main(int argc, char** argv)
            done = true;
          }
        }
@@ -4365,7 +4719,7 @@ index 7699c3d..9ad4eaf 100644
      }
      else
      {
-@@ -891,6 +1372,7 @@ int main(int argc, char** argv)
+@@ -891,6 +1470,7 @@ int main(int argc, char** argv)
      }
  
      ImGui::Spacing();
@@ -4373,7 +4727,7 @@ index 7699c3d..9ad4eaf 100644
      ImGui::TextUnformatted("Graphics backend");
      if (ImGui::BeginCombo("##graphics_backend",
                            graphics_backends[graphics_backend_index].text))
-@@ -940,13 +1422,31 @@ int main(int argc, char** argv)
+@@ -940,13 +1520,31 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -4408,7 +4762,7 @@ index 7699c3d..9ad4eaf 100644
          {
            std::string error;
            if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-@@ -981,6 +1481,35 @@ int main(int argc, char** argv)
+@@ -981,6 +1579,35 @@ int main(int argc, char** argv)
        }
      }
      ImGui::Spacing();
@@ -4444,7 +4798,7 @@ index 7699c3d..9ad4eaf 100644
      ImGui::TextUnformatted("Controller profile");
      const char* controller_preview = controller_index >= 0
                                           ? controllers[controller_index].label.c_str()
-@@ -993,18 +1522,17 @@ int main(int argc, char** argv)
+@@ -993,18 +1620,17 @@ int main(int argc, char** argv)
          const bool selected = controller_index == static_cast<int>(i);
          if (ImGui::Selectable(controllers[i].label.c_str(), selected))
          {
@@ -4467,7 +4821,7 @@ index 7699c3d..9ad4eaf 100644
      ImGui::BeginDisabled(controller_index < 0);
      const std::string replace_profile =
          "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-@@ -1012,67 +1540,573 @@ int main(int argc, char** argv)
+@@ -1012,67 +1638,630 @@ int main(int argc, char** argv)
        select_controller(controller_index);
      ImGui::EndDisabled();
      ImGui::Spacing();
@@ -4481,9 +4835,6 @@ index 7699c3d..9ad4eaf 100644
 -    netplay_port = std::clamp(netplay_port, 1, 65535);
 -    ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
 -    if (!automatic_buffer)
--    {
--      ImGui::SetNextItemWidth(180 * scale);
--      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
 +    bool boost_on_x = config.boost_on_x;
 +    // The wheel profile binds numbered buttons, which the swap can't rewrite.
 +    const bool wheel_selected = controller_index >= 0 && controllers[controller_index].wheel;
@@ -4506,8 +4857,58 @@ index 7699c3d..9ad4eaf 100644
 +        std::lock_guard lock(dialog.mutex);
 +        dialog.error = std::move(error);
 +      }
-     }
++    }
 +    ImGui::TextWrapped("Xbox-style layout: A accelerates, X boosts, Y takes the original X action. Sticks and triggers are preserved.");
++    const bool gamepad_selected =
++        controller_index >= 0 && !controllers[controller_index].wheel &&
++        controllers[controller_index].device != moderngekko::frontend::KEYBOARD_DEVICE;
++    if (gamepad_selected)
++    {
++      const std::string& device = controllers[controller_index].device;
++      if (z_detect.gamepad && z_detect.device != device)
++        stop_z_detect();
++      const bool custom_z = !config.z_button.empty() && config.z_button_device == device;
++      ImGui::Spacing();
++      ImGui::Text("Z button: %s", custom_z ? config.z_button.c_str() : "bumpers / Back (default)");
++      ImGui::SameLine();
++      ImGui::BeginDisabled(z_detect.gamepad != nullptr);
++      if (ImGui::SmallButton("Detect##z"))
++      {
++        z_detect.gamepad = SDL_OpenGamepad(controllers[controller_index].joystick);
++        if (z_detect.gamepad)
++        {
++          z_detect.device = device;
++          z_detect.started = SDL_GetTicks();
++        }
++        else
++        {
++          controller_status = std::string("Can't open the controller: ") + SDL_GetError();
++        }
++      }
++      if (custom_z)
++      {
++        ImGui::SameLine();
++        if (ImGui::SmallButton("Reset##z"))
++          apply_z({}, {});
++      }
++      ImGui::EndDisabled();
++      if (z_detect.gamepad)
++      {
++        ImGui::TextUnformatted(z_detect.rest_buttons.empty() ? "Release all buttons..." :
++                                                               "Press Z on your controller...");
++        poll_z_detect();
++      }
++      else
++      {
++        ImGui::TextDisabled("For adapters (e.g. 8BitDo GBros) where Z does nothing.");
++      }
++    }
++    else if (z_detect.gamepad)
+     {
+-      ImGui::SetNextItemWidth(180 * scale);
+-      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
++      stop_z_detect();
+     }
      ImGui::Spacing();
 -    ImGui::TextUnformatted("Game disc image");
 -    if (selected_image)
@@ -4564,20 +4965,26 @@ index 7699c3d..9ad4eaf 100644
 -          extraction.running = true;
 +          wheel_detect.joystick = SDL_OpenJoystick(controllers[controller_index].joystick);
 +          if (wheel_detect.joystick)
-+          {
+           {
+-            std::lock_guard lock(extraction.mutex);
+-            extraction.error.clear();
+-            extraction.finished_game.reset();
 +            wheel_detect.binding = &binding;
 +            wheel_detect.pedal = pedal;
 +            wheel_detect.prompt = prompt;
 +            wheel_detect.started = SDL_GetTicks();
 +          }
 +          else
-           {
--            std::lock_guard lock(extraction.mutex);
--            extraction.error.clear();
--            extraction.finished_game.reset();
++          {
 +            controller_status = std::string("Can't open the wheel: ") + SDL_GetError();
-+          }
-+        }
+           }
+-          const fs::path image = *selected_image;
+-          extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
+-                                           {
+-                                             ExtractDisc(image, user_directory,
+-                                                         release_directory, &extraction);
+-                                           });
+         }
 +        ImGui::EndDisabled();
 +        ImGui::PopID();
 +      };
@@ -4591,7 +4998,7 @@ index 7699c3d..9ad4eaf 100644
 +        ImGui::TextUnformatted(wheel_detect.rest.empty() ? "Keep the wheel still..." :
 +                                                           wheel_detect.prompt);
 +        poll_wheel_detect();
-+      }
+       }
 +      bool reverse_force = config.wheel_force_reverse;
 +      if (ImGui::Checkbox("Reverse force feedback", &reverse_force))
 +      {
@@ -4605,6 +5012,18 @@ index 7699c3d..9ad4eaf 100644
 +      stop_wheel_detect();
 +    }
 +    ImGui::Spacing();
+     }
+     else
+     {
+-      const float progress =
+-          std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
+-      ImGui::ProgressBar(progress, ImVec2(-1, 0));
++      // Detection only polls while the section is open; a collapsed section
++      // would otherwise leave it running and take a later press.
++      if (z_detect.gamepad)
++        stop_z_detect();
++      if (wheel_detect.joystick)
++        stop_wheel_detect();
 +    }
 +    const std::string game_id =
 +        current_metadata ? current_metadata.metadata->disc_id : std::string();
@@ -4750,19 +5169,12 @@ index 7699c3d..9ad4eaf 100644
 +              mod_browser_directory = path;
 +              mod_browser_refresh = true;
 +            }
-           }
--          const fs::path image = *selected_image;
--          extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
--                                           {
--                                             ExtractDisc(image, user_directory,
--                                                         release_directory, &extraction);
--                                           });
-         }
++          }
++        }
 +        ImGui::EndChild();
 +        ImGui::EndPopup();
-       }
-     }
--    else
++      }
++    }
 +    ImGui::Spacing();
 +    }
 +    if (ImGui::CollapsingHeader("CHEATS & UNLOCKS")) {
@@ -4949,10 +5361,7 @@ index 7699c3d..9ad4eaf 100644
 +        !current_metadata || extraction.running ||
 +        ImGui::CollapsingHeader("GAME FILES & DISC IMAGE");
 +    if (show_disc_section)
-     {
--      const float progress =
--          std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
--      ImGui::ProgressBar(progress, ImVec2(-1, 0));
++    {
 +      if (current_metadata)
 +      {
 +        ImGui::TextUnformatted("Extracted game folder");
@@ -5088,7 +5497,7 @@ index 7699c3d..9ad4eaf 100644
      }
  
      {
-@@ -1090,16 +2124,71 @@ int main(int argc, char** argv)
+@@ -1090,16 +2279,71 @@ int main(int argc, char** argv)
      ImGui::Spacing();
      ImGui::Separator();
      ImGui::TextWrapped("Controller: %s", controller_status.c_str());
@@ -5160,7 +5569,7 @@ index 7699c3d..9ad4eaf 100644
    if (extraction_thread.joinable())
      extraction_thread.join();
  
-@@ -1118,6 +2207,10 @@ int main(int argc, char** argv)
+@@ -1118,6 +2362,10 @@ int main(int argc, char** argv)
        std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                     current_game.string(), "--user-dir",
                                                     user_directory.string()};
@@ -5171,7 +5580,7 @@ index 7699c3d..9ad4eaf 100644
        // Solo only: see the note by the dropdown.
        if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
            static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-@@ -1165,6 +2258,13 @@ int main(int argc, char** argv)
+@@ -1165,6 +2413,13 @@ int main(int argc, char** argv)
        std::filesystem::create_directories(log_path.parent_path(), log_error);
        SDL_IOStream* log_stream =
            log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
@@ -5185,7 +5594,7 @@ index 7699c3d..9ad4eaf 100644
        SDL_Process* process = nullptr;
        std::string process_error;
        if (log_stream)
-@@ -1201,9 +2301,35 @@ int main(int argc, char** argv)
+@@ -1201,9 +2456,35 @@ int main(int argc, char** argv)
        }
        else
        {
@@ -5223,7 +5632,7 @@ index 7699c3d..9ad4eaf 100644
          SDL_DestroyProcess(process);
          if (!waited || exit_code != 0)
          {
-@@ -1239,15 +2365,18 @@ int main(int argc, char** argv)
+@@ -1239,15 +2520,18 @@ int main(int argc, char** argv)
                launch_error = "The nickname was rejected by the host.";
                break;
              default:
@@ -5246,7 +5655,7 @@ index 7699c3d..9ad4eaf 100644
            }
            else
            {
-@@ -1266,8 +2395,24 @@ int main(int argc, char** argv)
+@@ -1266,8 +2550,24 @@ int main(int argc, char** argv)
    ImGui_ImplSDLRenderer3_Shutdown();
    ImGui_ImplSDL3_Shutdown();
    ImGui::DestroyContext();
