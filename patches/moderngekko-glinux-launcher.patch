@@ -523,7 +523,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..b1bd093 100644
+index 6bb9e0e..9f26069 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,8 +1,12 @@
@@ -772,7 +772,7 @@ index 6bb9e0e..b1bd093 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +340,379 @@ int main() {
+@@ -138,6 +340,380 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -877,9 +877,10 @@ index 6bb9e0e..b1bd093 100644
 +      std::ifstream in_usa(directory / "GameSettings" / "GFZE01.ini");
 +      std::string usa_ini((std::istreambuf_iterator<char>(in_usa)), {});
 +      if (!pal_ini.contains("14165040 40155555") ||
-+          !pal_ini.contains("14162D60 3F100000") ||
++          !pal_ini.contains("14162D60 3F124925") ||
 +          usa_ini.contains("14165040") || usa_ini.contains("14162D60") ||
 +          !usa_ini.contains("14164108 40155555") ||
++          !usa_ini.contains("14161E98 3F124925") ||
 +          !usa_ini.contains("$21:9 Ultrawide 3D & HUD [GLINUX]") ||
 +          usa_ini.contains("65656E00") || pal_ini.contains("(PAL only) [GLINUX]"))
 +        return 130;
@@ -1209,7 +1210,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..7af5137 100644
+index 03740d4..0450e44 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -4,6 +4,7 @@
@@ -1247,7 +1248,7 @@ index 03740d4..7af5137 100644
    return {};
  }
  
-@@ -73,24 +72,609 @@ std::string_view ControllerSectionPrefix() {
+@@ -73,24 +72,611 @@ std::string_view ControllerSectionPrefix() {
  
  } // namespace
  
@@ -1757,7 +1758,9 @@ index 03740d4..7af5137 100644
 +          // 16:9 monitor: picture not stretched). The value words of the GFZE01 21:9 code from
 +          // gamemasterplc's site and Almar's Guides (two HUD scales and the
 +          // aspect); its ASCII "21:9" label write is left out. The id keeps
-+          // its old name so saved selections still apply.
++          // its old name so saved selections still apply. HUD scale: exact
++          // (4/3) / (21/9) = 0.5714 (3F124925) instead of the sourced 0.5625,
++          // see the 32:9 entry and ULTRAWIDE-FINDINGS.md.
 +          "ultrawide_21_9_pal",
 +          "Camera, HUD & Audio Tweaks",
 +          "21:9 Ultrawide 3D & HUD [GLINUX]",
@@ -1765,14 +1768,14 @@ index 03740d4..7af5137 100644
 +          "$21:9 Ultrawide 3D & HUD [GLINUX]",
 +          "48000000 800030C8\n"
 +          "DE000000 80008180\n"
-+          "141607E0 3F100000\n"
-+          "14161E98 3F100000\n"
++          "141607E0 3F124925\n"
++          "14161E98 3F124925\n"
 +          "14164108 40155555\n"
 +          "E0000000 80008000\n",
 +          "48000000 800030C8\n"
 +          "DE000000 80008180\n"
 +          "14165040 40155555\n"
-+          "14162D60 3F100000\n"
++          "14162D60 3F124925\n"
 +          "E0000000 80008000\n",
 +      },
 +      {
@@ -1861,7 +1864,7 @@ index 03740d4..7af5137 100644
  ConfigResult LoadConfig(const fs::path &user_directory,
                          bool create_if_missing) {
    const fs::path path = user_directory / "config.ini";
-@@ -126,6 +710,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -126,6 +712,29 @@ ConfigResult LoadConfig(const fs::path &user_directory,
        if (config.graphics_backend.empty())
          return {.error = "graphics backend must be Vulkan or OpenGL"};
      }
@@ -1891,7 +1894,7 @@ index 03740d4..7af5137 100644
      else if (key == "controller")
        config.controller = raw_value;
      else if (key.starts_with("controller") && key.size() == 11 &&
-@@ -140,6 +747,54 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +749,54 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -1946,7 +1949,7 @@ index 03740d4..7af5137 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -185,10 +840,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -185,10 +842,18 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    for (const ResolutionOption &option : SupportedResolutions()) {
      if (config.resolution == option.text) {
        config.dolphin_scale = option.dolphin_scale;
@@ -1965,7 +1968,7 @@ index 03740d4..7af5137 100644
    // Dolphin also accepts exact raw EFB multiples even when they do not have a
    // common display label.
    for (int scale = 1; scale <= 12; ++scale) {
-@@ -210,17 +873,25 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -210,17 +875,25 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
                  std::string *error) {
    const std::string graphics_backend =
        NormalizeGraphicsBackend(config.graphics_backend);
@@ -1994,7 +1997,7 @@ index 03740d4..7af5137 100644
    if (config.netplay_buffer != "auto") {
      unsigned int frames = 0;
      const auto parsed = std::from_chars(
-@@ -235,6 +906,26 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -235,6 +908,26 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        return false;
      }
    }
@@ -2021,7 +2024,7 @@ index 03740d4..7af5137 100644
    std::error_code ec;
    fs::create_directories(user_directory, ec);
    if (ec) {
-@@ -249,28 +940,58 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -249,28 +942,58 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      return false;
    }
    file << "# ModernGekko frontend settings\n"
@@ -2088,7 +2091,7 @@ index 03740d4..7af5137 100644
    return true;
  }
  
-@@ -336,6 +1057,151 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,6 +1059,151 @@ bool ControllerConfigExists(const fs::path &user_directory) {
    return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
  }
  
@@ -2240,7 +2243,7 @@ index 03740d4..7af5137 100644
  bool GenerateControllerConfig(const fs::path &user_directory,
                                std::span<const std::string> controllers,
                                std::string *message) {
-@@ -367,32 +1233,83 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -367,32 +1235,83 @@ bool GenerateControllerConfig(const fs::path &user_directory,
        *message = "can't write " + destination.string();
      return false;
    }
@@ -2328,7 +2331,7 @@ index 03740d4..7af5137 100644
                "D-Pad/Up = `Pad N`\n"
                "D-Pad/Down = `Pad S`\n"
                "D-Pad/Left = `Pad W`\n"
-@@ -477,6 +1394,173 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+@@ -477,6 +1396,173 @@ bool GenerateControllerConfig(const fs::path &user_directory,
        user_directory, std::span<const std::string>(&value, 1), message);
  }
  
@@ -2502,7 +2505,7 @@ index 03740d4..7af5137 100644
  bool EnsureControllerConfig(const fs::path &user_directory,
                              std::span<const std::string> controllers,
                              std::string *message) {
-@@ -494,4 +1578,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
+@@ -494,4 +1580,407 @@ bool EnsureControllerConfig(const fs::path &user_directory,
    return EnsureControllerConfig(
        user_directory, std::span<const std::string>(&value, 1), message);
  }

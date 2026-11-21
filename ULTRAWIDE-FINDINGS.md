@@ -211,8 +211,8 @@ computes `x' = c + s * (x - c)` (c = a game variable) for positions and
 `w' = s * w` for widths. With s = 0.75 the 16:9 stretch (x 4/3) cancels it, so
 the exact value is s = (4/3) / aspect: **0.5714 (`3F124925`) for 21:9 and
 0.375 (`3EC00000`) for 32:9**. The forum values make the HUD 1.6% too narrow
-(21:9, `3F100000`) and 1% too wide (32:9, `3EC20000`). The 32:9 code uses the
-exact value. The PAL word po+0x162D60 is the same constant (PAL HUD code at
+(21:9, `3F100000`) and 1% too wide (32:9, `3EC20000`). Both the 32:9 code and, since the same day, the 21:9 code
+(all three HUD words, both regions; was `3F100000`) use the exact value. The PAL word po+0x162D60 is the same constant (PAL HUD code at
 po+0x52AEC); PAL needs no counterpart of `rodata_10C0[4]`.
 
 The 21:9 and 32:9 codes write the same words, so the launcher unchecks one
