@@ -80,6 +80,9 @@ The AppImage launcher must offer these display presets, in the requested order:
 | 1440p Ultrawide | 3440 × 1440 | QHD Ultrawide (21:9) |
 | 4K | 3840 × 2160 | UHD |
 | 4K Ultrawide | 5120 × 2160 | UHD / 5K2K Ultrawide (21:9) |
+| 1080p Super Ultrawide | 3840 × 1080 | Super Ultrawide (32:9), 3× EFB |
+| 1440p Super Ultrawide | 5120 × 1440 | Super Ultrawide (32:9), 4× EFB |
+| 4K Super Ultrawide | 7680 × 2160 | Super Ultrawide (32:9), 6× EFB; heavy on the GPU |
 
 These are output dimensions, not claims about the original EFB dimensions.
 Internal render scaling must be defined separately and exposed accurately.
@@ -206,12 +209,12 @@ Run `bash scripts/play-glinux.sh` to use the JIT launcher with existing saves.
   stick scrolls. A visible cyan focus outline marks the selected control.
   An in-launcher folder browser supports ISO/RVZ selection with the gamepad.
   Netplay text fields still need keyboard input (or the Steam keyboard).
-- Output presets: 480p, 800p Steam Deck, 720p, 1080p, 1080p Ultrawide, 1440p, 1440p Ultrawide, 4K, 4K Ultrawide. Windowed
+- Output presets: 480p, 800p Steam Deck, 720p, 1080p, 1080p Ultrawide, 1440p, 1440p Ultrawide, 4K, 4K Ultrawide, and 32:9 Super Ultrawide at 1080p, 1440p and 4K. Windowed
   dimensions follow the preset; fullscreen uses the desktop's current mode.
   The 800p preset requests 1280x800 with 2x internal EFB rendering. Use 16:9
   display aspect with the game's widescreen setting for correct proportions
   and letterboxing on the Deck. Ultrawide presets pair with the 21:9 aspect ratio, which stretches the
-  game's 16:9 picture sideways; the local Gecko code "21:9 Ultrawide 3D & HUD" widens the camera. It is tested in-game on PAL (`GFZP01`); the NTSC-U (`GFZE01`) version uses the sourced US code's values and has only been briefly checked (see `ULTRAWIDE-FINDINGS.md`). Existing legacy render-scale values still load.
+  game's 16:9 picture sideways; the local Gecko code "21:9 Ultrawide 3D & HUD" widens the camera. It is tested in-game on PAL (`GFZP01`); the NTSC-U (`GFZE01`) version uses the sourced US code's values and has only been briefly checked (see `ULTRAWIDE-FINDINGS.md`). The 32:9 presets pair with the 32:9 aspect ratio and the experimental code "32:9 Super Ultrawide 3D & HUD" (issue #19, untested in-game; the launcher keeps only one of the two ultrawide codes enabled). Existing legacy render-scale values still load.
 - VSync On/Off; anti-aliasing Off/FXAA/4x MSAA; anisotropic filtering
   1x/2x/4x/8x/16x. Unsupported MSAA falls back to Off in Dolphin. FXAA's shader
   is included in the built Sys/Shaders resources. Graphics apply at game launch.

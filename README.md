@@ -27,12 +27,12 @@ disc contents and personal memory-card saves are not included in the packages.
 
 - **USA (`GFZE01`) & PAL (`GFZP01`) support:** import either region's ISO or RVZ; PAL boots with 60Hz (`EuRGB60`) enabled for full 60 FPS gameplay.
 - **Controller-friendly launcher** with racing artwork, gamepad navigation and clear loading feedback.
-- **Nine resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K and 4K Ultrawide (5120×2160).
+- **Twelve resolution presets:** 480p, Steam Deck-sized 800p, 720p, 1080p, 1080p Ultrawide (2560×1080), 1440p, 1440p Ultrawide (3440×1440), 4K, 4K Ultrawide (5120×2160), and 32:9 Super Ultrawide at 3840×1080, 5120×1440 and 7680×2160.
 - **Graphics options:** VSync, FXAA or 4× MSAA, texture filtering and fullscreen.
 - **Boost on X:** optional X/Y swap for modern four-button gamepads.
 - **Z button Detect:** for adapters such as the 8BitDo GBros, where Z does nothing or a full R press fires the spin attack. Click Detect under Controller and press Z on your pad.
 - **Steering wheels (experimental, untested):** an opt-in Controller setting lists your wheel, detects its steering, gas and brake axes, and uses Dolphin's GameCube steering wheel mode with force feedback in local play. Wheel drivers come from your system.
-- **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. The experimental local code "21:9 Ultrawide 3D & HUD" widens the 3D view and fixes the stretched HUD: tested in-game on PAL (`GFZP01`), briefly checked on NTSC-U (`GFZE01`).
+- **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. The experimental local code "21:9 Ultrawide 3D & HUD" widens the 3D view and fixes the stretched HUD: tested in-game on PAL (`GFZP01`), briefly checked on NTSC-U (`GFZE01`). A 32:9 display option with the code "32:9 Super Ultrawide 3D & HUD" does the same for super-ultrawide monitors (experimental, untested in-game).
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
 - **Separate user data:** saves and settings survive package updates.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
@@ -193,7 +193,7 @@ minutes on slower GPUs; later starts are fast.
 1. Select **Browse for ISO / RVZ** and import your USA (`GFZE01`) or PAL (`GFZP01`) game image. For Flatpak, use Downloads. PAL versions automatically run with 60Hz mode enabled.
 2. Open **Controller**, choose your gamepad and optionally enable **Boost on X**.
 3. Choose your graphics settings, then press **PLAY**. The loading screen stays visible while the game starts.
-4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9 or 21:9 display setting in the launcher.
+4. Create your own player name in-game. For widescreen, enable the game's native Screen Mode option and select the matching 16:9, 21:9 or 32:9 display setting in the launcher.
 
 To exit a race, press **Escape**, then use the D-pad and A/B on the confirmation
 window. Offline play pauses while the prompt is open; an online session keeps
@@ -261,7 +261,7 @@ imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
 | Game versions | NTSC-U (`GFZE01`) and PAL (`GFZP01`) supported (PAL runs at 60Hz) |
 | JIT gameplay | Playable; smooth 60 FPS reported on that machine |
 | Static recompilation | Experimental; performance work remains |
-| Native widescreen / 21:9 | 16:9 in-game setting. 21:9: widened-camera code (experimental), tested on PAL, briefly checked on NTSC-U (see `ULTRAWIDE-FINDINGS.md`) |
+| Native widescreen / 21:9 / 32:9 | 16:9 in-game setting. 21:9: widened-camera code (experimental), tested on PAL, briefly checked on NTSC-U. 32:9: same approach, untested in-game (see `ULTRAWIDE-FINDINGS.md`) |
 | Steam Deck / Bazzite / Debian | Target testing remains; 800p preset is available |
 | Windows | Working: portable zip built with MSVC; launcher, gamepad and audio confirmed with Direct3D 11 and Vulkan. Online play not yet tested on Windows |
 | Online play | Working between two machines with 4-word room codes; split screen, up to 4 players |

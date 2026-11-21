@@ -181,3 +181,23 @@ Quick check, same day: US disc, launcher aspect 21:9 on a 1440p (16:9)
 monitor, game Screen Mode Wide, code on: letterboxed 21:9 picture, cars and
 HUD not stretched. No side-by-side comparison with the code off yet;
 split screen and other courses are still untested.
+
+## Update 2026-11-22: 32:9 (GitHub issue #19, untested)
+
+Added the aspect option `32:9` (Dolphin `CustomStretch` 32/9), three presets
+(3840x1080 at 3x EFB, 5120x1440 at 4x, 7680x2160 at 6x) and the local code
+`ultrawide_32_9`, "32:9 Super Ultrawide 3D & HUD [GLINUX]":
+
+- GFZE01: the value words of the sourced 32:9 code (source 3 above):
+  `141607E0 3EC20000`, `14161E98 3EC20000`, `14164108 40638E39`, inside the
+  `po` guard; ASCII label write left out, as for 21:9.
+- GFZP01: the two words found for 21:9 with 32:9 values:
+  `14165040 40638E39` (aspect 32/9) and `14162D60 3EC20000` (HUD scale, copied
+  from the US code like `3F100000` was for 21:9; the exact (4/3)/(32/9) would
+  be 0.375, `3EC00000`).
+
+The 21:9 and 32:9 codes write the same words, so the launcher unchecks one
+when the other is enabled. Neither region has been run at 32:9. It can be
+checked letterboxed on a 16:9 monitor (game Screen Mode Wide, launcher aspect
+32:9, code on): cars and HUD should not be stretched. Edge culling is more
+likely to show at 32:9 than at 21:9.
