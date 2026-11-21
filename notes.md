@@ -5,7 +5,7 @@ Updated: 2026-11-07 (v0.9.4).
 
 ## Unreleased — 32:9 super ultrawide (issue #19), 2026-11-22
 
-- Aspect option `32:9`, presets 3840x1080 / 5120x1440 / 7680x2160, local code "32:9 Super Ultrawide 3D & HUD [GLINUX]" (`ultrawide_32_9`; US words from DM_ME_UR_SATS' Dolphin forum code, PAL words = the 21:9 addresses with 32:9 values). Mutually exclusive with the 21:9 code in the launcher. Tests: codes 35, 50 (12 presets), 131; all 50 ctest tests pass. Not run in-game.
+- Aspect option `32:9`, presets 3840x1080 / 5120x1440 / 7680x2160, local code "32:9 Super Ultrawide 3D & HUD [GLINUX]" (`ultrawide_32_9`; US words from DM_ME_UR_SATS' Dolphin forum code, PAL words = the 21:9 addresses with 32:9 values). Mutually exclusive with the 21:9 code in the launcher. HUD scale set to the exact 0.375 (`3EC00000`) after reading the US HUD layout code from the 2026-10-20 RAM dump (see `ULTRAWIDE-FINDINGS.md`); the 21:9 code still uses 0.5625 (exact 0.5714). Tests: codes 35, 50 (12 presets), 131; all 50 ctest tests pass. Not run in-game.
 
 
 ## Latest update — Release 0.9.4: Z button Detect, screen stays awake, PAL unlock fix, 2026-11-07

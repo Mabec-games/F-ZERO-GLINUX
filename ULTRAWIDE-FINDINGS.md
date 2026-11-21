@@ -188,13 +188,32 @@ Added the aspect option `32:9` (Dolphin `CustomStretch` 32/9), three presets
 (3840x1080 at 3x EFB, 5120x1440 at 4x, 7680x2160 at 6x) and the local code
 `ultrawide_32_9`, "32:9 Super Ultrawide 3D & HUD [GLINUX]":
 
-- GFZE01: the value words of the sourced 32:9 code (source 3 above):
-  `141607E0 3EC20000`, `14161E98 3EC20000`, `14164108 40638E39`, inside the
-  `po` guard; ASCII label write left out, as for 21:9.
+- GFZE01: the words of the sourced 32:9 code (source 3 above) with the HUD
+  value corrected: `141607E0 3EC00000`, `14161E98 3EC00000`,
+  `14164108 40638E39`, inside the `po` guard; ASCII label write left out.
 - GFZP01: the two words found for 21:9 with 32:9 values:
-  `14165040 40638E39` (aspect 32/9) and `14162D60 3EC20000` (HUD scale, copied
-  from the US code like `3F100000` was for 21:9; the exact (4/3)/(32/9) would
-  be 0.375, `3EC00000`).
+  `14165040 40638E39` (aspect 32/9) and `14162D60 3EC00000` (HUD scale 0.375).
+
+### HUD scale checked against the US code (2026-11-22)
+
+From the US RAM dump of 2026-10-20 (`build/widescreen-research/headless-control/ram-low.bin`,
+module 1 at `0x801ba700`, `.rodata` at po+0x15f710), compared with the decomp
+(karamzov123/fzero-gx-decomp, GFZE01 `main_rel` symbols):
+
+| US word (`po`+) | `.rodata` | Decomp symbol | Vanilla | Used by |
+| --- | --- | --- | --- | --- |
+| `0x1607E0` | `0x10D0` | `lbl_1_rodata_10C0[4]` | 0.75 | no direct load found (array is read elsewhere at other indices) |
+| `0x161E98` | `0x2788` | `lbl_1_rodata_2788[0]` | 0.75 | HUD layout, po+0x52240 and po+0x522e8 |
+| `0x164108` | `0x49F8` | `lbl_1_rodata_49F8` | 16/9 | aspect getter, po+0xa70e0 (4/3 at `0x49FC`) |
+
+The HUD layout code (po+0x52200..0x52328) runs only in widescreen mode and
+computes `x' = c + s * (x - c)` (c = a game variable) for positions and
+`w' = s * w` for widths. With s = 0.75 the 16:9 stretch (x 4/3) cancels it, so
+the exact value is s = (4/3) / aspect: **0.5714 (`3F124925`) for 21:9 and
+0.375 (`3EC00000`) for 32:9**. The forum values make the HUD 1.6% too narrow
+(21:9, `3F100000`) and 1% too wide (32:9, `3EC20000`). The 32:9 code uses the
+exact value. The PAL word po+0x162D60 is the same constant (PAL HUD code at
+po+0x52AEC); PAL needs no counterpart of `rodata_10C0[4]`.
 
 The 21:9 and 32:9 codes write the same words, so the launcher unchecks one
 when the other is enabled. Neither region has been run at 32:9. It can be
