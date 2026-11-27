@@ -1,16 +1,23 @@
 # F-ZERO GLINUX — progress notes
 
-Updated: 2026-11-07 (v0.9.4).
+Updated: 2026-11-27 (v0.9.5).
 
 
-## Unreleased — Portable storage (issue #20), 2026-11-27
+## Latest update — Release 0.9.5: portable data folder, 32:9 super ultrawide, new icon, 2026-11-27
+
+- **Portable data folder (issue #20)** and **32:9 super ultrawide (issue #19)**: details in the two sections below. Issues #19 and #20 are in the GitHub milestone v0.9.5.
+- **New app icon:** the F-ZERO logo (`img/icon.png`, copied to `packaging/fzero-glinux-logo.png`) centred at full width on a transparent square. `scripts/make-windows-icon.py` (now Pillow) writes `packaging/fzero-glinux.png` (512 px; AppImage and Flatpak) and `packaging/windows/fzero-glinux.ico` (16–256 px); `fzero-glinux.svg` removed. Readable from 32 px; at 16 px the wide logo is a thin strip.
+- Dev CI for `efa69fc` green (AppImage and Windows).
+
+
+## Portable storage (issue #20), 2026-11-27
 
 - **Data lives next to the app.** Saves, settings, mods and the extracted game go in one visible `F-ZERO-GLINUX-data` folder beside the `.AppImage` (Windows: beside `F-ZERO GLINUX.exe`), instead of the hidden `~/.local/share/fzero-glinux` / `%LOCALAPPDATA%\fzero-glinux`. Fixed name, so new versions in the same folder share it. Falls back to the old location when the app's folder is read-only. `portable.txt`/`portable.ini` beside the app overrides it (empty = loose beside the app, first line = folder). `GLINUX_USER_DIR`/`--user-dir` still win; Flatpak unchanged. `ResolveUserDirectory` in `frontend_config.cpp` is the only place this is decided; AppRun no longer passes `--user-dir` (it sets `GLINUX_APP_DIR` for extracted-AppDir runs).
 - **Moving old files.** First start in a new data folder offers to move the old profile; GAME FILES has "Move files from <old location>" and "Move files from another folder..." (another copy's data folder); CLI `--transfer-local`. `TransferProfile` moves everything (rename on the same drive; copy, size check, delete across drives), moves links as links, rewrites `default-game.txt` and `Config/glinux-mods.txt` paths that pointed inside the old profile, and removes the old folder once empty. Into a brand-new profile it replaces the launcher's fresh defaults (so the old `config.ini` wins); into one in use, clashing files stay in the old folder. Runs on a background thread with the launcher disabled meanwhile. (Copy-only was tried first; the user chose move so no hidden duplicate is left.)
 - First draft by Gemini made the app folder itself the profile (files loose in e.g. ~/Downloads, guessed `data`/`user` folders), lost the old `config.ini` (the launcher writes a default before the copy, which then skipped it), and had Linux-only banner text on Windows; reworked as above. Also added `patches/sdl-glibc-posix-spawn.patch` (`posix_spawn_file_actions_addchdir_np` on glibc). Tests: frontend_config 230–247, plus a manual tmpfs→btrfs move; all 50 ctest tests pass. Sandbox run of the real launcher: banner shown, `--transfer-local` kept the old resolution and save. Windows build not run.
 
 
-## Unreleased — 32:9 super ultrawide (issue #19), 2026-11-22
+## 32:9 super ultrawide (issue #19), 2026-11-22
 
 - Aspect option `32:9`, presets 3840x1080 / 5120x1440 / 7680x2160, local code "32:9 Super Ultrawide 3D & HUD [GLINUX]" (`ultrawide_32_9`; US words from DM_ME_UR_SATS' Dolphin forum code, PAL words = the 21:9 addresses with 32:9 values). Mutually exclusive with the 21:9 code in the launcher. HUD scale set to the exact 0.375 (`3EC00000`) after reading the US HUD layout code from the 2026-10-20 RAM dump (see `ULTRAWIDE-FINDINGS.md`). The 21:9 code now also uses the exact 0.5714 (`3F124925`, was the sourced 0.5625); the 21:9 in-game test was done with 0.5625. Tests: codes 35, 50 (12 presets), 131; all 50 ctest tests pass. Not run in-game.
 
@@ -1285,7 +1292,7 @@ text; ignore it if fetched again.
 - PAL now: tickets 0x2486F8, ghosts 0x248700, cups/chapters 0x248704/06, master/finale 0x248708, songs 0x248710.
 - Verified headless (PAL ISO, profile copy, `--cheats`): all fields set in RAM at the new addresses. frontend_config tests pass. Not yet checked in the PAL shop UI.
 
-## TODO: new launcher/app icon (requested 2026-10-30, not done yet)
+## Done in v0.9.5: new launcher/app icon (requested 2026-10-30)
 - User wants `/home/martin/Downloads/F-ZERO GX/img/icon.png` as the icon from now on, **including public `glinux` releases** (user's decision; it is Nintendo's F-ZERO logo). No repackaging needed now: do it in the next build/release.
 - Source: 877×217 RGBA PNG (wide chrome F-ZERO logo, transparent background), sha256 `f2dbfb2135987fa700bb43086767c614382459323b0aa292df6a34f70c0c82bf`. Copy it into the repo (e.g. `packaging/fzero-glinux.png`) since `img/` is outside the repo.
 - Icons it must replace (all currently come from `packaging/fzero-glinux.svg`):

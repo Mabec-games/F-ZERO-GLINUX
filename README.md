@@ -34,7 +34,7 @@ disc contents and personal memory-card saves are not included in the packages.
 - **Steering wheels (experimental, untested):** an opt-in Controller setting lists your wheel, detects its steering, gas and brake axes, and uses Dolphin's GameCube steering wheel mode with force feedback in local play. Wheel drivers come from your system.
 - **Native widescreen:** use GX's own Screen Mode setting for 16:9. A 21:9 display option and three ultrawide output presets fill ultrawide monitors. The experimental local code "21:9 Ultrawide 3D & HUD" widens the 3D view and fixes the stretched HUD: tested in-game on PAL (`GFZP01`), briefly checked on NTSC-U (`GFZE01`). A 32:9 display option with the code "32:9 Super Ultrawide 3D & HUD" does the same for super-ultrawide monitors (experimental, untested in-game).
 - **Exit confirmation:** Escape opens a prompt; D-pad selects, A confirms and B resumes.
-- **Separate user data:** saves and settings survive package updates.
+- **Portable data folder:** saves, settings, mods and the extracted game live in one `F-ZERO-GLINUX-data` folder next to the AppImage or `.exe`, not hidden away; new versions in the same folder keep using it. Files from older versions are moved over with one click.
 - **Mods:** add HD texture packs and Dolphin graphics mods from any folder.
 - **Online play:** host a room and share a 4-word room code; no IP addresses needed.
 - **Unlock everything & Local Gecko Codes (Experimental):** one switch gives 99,999 tickets and unlocks every cup, machine, Gold Part, Staff Ghost, Story chapter and shop song (works in both Local and Online play), plus 16 optional Gecko codes for Local Play (15 by Ralf, plus the 21:9 ultrawide code) (*Experimental - A work in progress*; automatically disabled in Online rooms).
@@ -153,21 +153,21 @@ can't be written to, such as Program Files). Files from older versions in
 
 ## Start playing
 
-The filenames below are those of the **v0.9.4** release. When building locally,
+The filenames below are those of the **v0.9.5** release. When building locally,
 find them in `dist/`. See [Releases](https://github.com/Mabec-games/F-ZERO-GLINUX/releases)
 for any published downloads; source publication does not automatically publish binaries.
 
 ### AppImage
 
 ```bash
-chmod +x F-ZERO-GLINUX-0.9.4-glibc2.35-x86_64.AppImage
-./F-ZERO-GLINUX-0.9.4-glibc2.35-x86_64.AppImage
+chmod +x F-ZERO-GLINUX-0.9.5-glibc2.35-x86_64.AppImage
+./F-ZERO-GLINUX-0.9.5-glibc2.35-x86_64.AppImage
 ```
 
 If FUSE is unavailable, run:
 
 ```bash
-./F-ZERO-GLINUX-0.9.4-glibc2.35-x86_64.AppImage --appimage-extract-and-run
+./F-ZERO-GLINUX-0.9.5-glibc2.35-x86_64.AppImage --appimage-extract-and-run
 ```
 
 The release AppImage is smoke-tested on Ubuntu 22.04 and 24.04, Debian 12 and
@@ -193,7 +193,7 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 
 ### Windows
 
-1. Download `F-ZERO-GLINUX-0.9.4-windows-x64.zip` and unpack it to any folder.
+1. Download `F-ZERO-GLINUX-0.9.5-windows-x64.zip` and unpack it to any folder.
 2. Run `F-ZERO GLINUX.exe`. If SmartScreen warns about an unknown publisher,
    choose **More info → Run anyway**; the preview is not code-signed.
 

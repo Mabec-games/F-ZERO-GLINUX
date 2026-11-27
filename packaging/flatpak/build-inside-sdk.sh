@@ -26,7 +26,7 @@ install -Dm644 assets/fonts/NotoSans-*.ttf -t /app/bin/Assets
 install -Dm644 assets/fonts/OFL.txt /app/share/licenses/fzero-glinux/NotoSans.txt
 install -Dm755 flatpak/fzero-glinux /app/bin/fzero-glinux
 install -Dm644 flatpak/io.github.mabecgames.FZeroGLinux.desktop /app/share/applications/io.github.mabecgames.FZeroGLinux.desktop
-install -Dm644 fzero-glinux.svg /app/share/icons/hicolor/scalable/apps/io.github.mabecgames.FZeroGLinux.svg
+install -Dm644 fzero-glinux.png /app/share/icons/hicolor/512x512/apps/io.github.mabecgames.FZeroGLinux.png
 install -Dm644 ModernGekko/LICENSE /app/share/licenses/fzero-glinux/ModernGekko.txt
 install -Dm644 ModernGekko/vendor/dolphin/COPYING /app/share/licenses/fzero-glinux/Dolphin.txt
 # Fail packaging if a newly introduced shared dependency cannot resolve in SDK.

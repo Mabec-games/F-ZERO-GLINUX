@@ -53,7 +53,7 @@ try:
             raise RuntimeError(f'Patch conflicts in snapshot: {patch.name}; working checkout untouched')
     shutil.copytree(root / 'assets', source / 'assets')
     shutil.copytree(root / 'packaging/flatpak', source / 'flatpak')
-    shutil.copy2(root / 'packaging/fzero-glinux.svg', source / 'fzero-glinux.svg')
+    shutil.copy2(root / 'packaging/fzero-glinux.png', source / 'fzero-glinux.png')
     manifest = json.loads((root / 'packaging/flatpak/io.github.mabecgames.FZeroGLinux.json').read_text())
     manifest['modules'][0]['sources'][0]['path'] = source.name
     path = work / 'io.github.mabecgames.FZeroGLinux.json'

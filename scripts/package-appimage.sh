@@ -24,7 +24,7 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 "$deploy" --appdir "$appdir" \
     --executable "$appdir/usr/bin/ModernGekko" --executable "$appdir/usr/bin/moderngekko-run" \
     --desktop-file "$root/packaging/fzero-glinux.desktop" \
-    --icon-file "$root/packaging/fzero-glinux.svg" --custom-apprun "$root/packaging/AppRun"
+    --icon-file "$root/packaging/fzero-glinux.png" --custom-apprun "$root/packaging/AppRun"
 python3 "$root/scripts/collect-appimage-licenses.py" "$root" "$appdir"
 python3 "$root/scripts/audit-appdir.py" "$appdir"
 minimum="$(cat "$appdir/usr/share/fzero-glinux/minimum-glibc")"
