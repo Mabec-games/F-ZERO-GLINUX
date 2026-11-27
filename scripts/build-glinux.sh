@@ -19,6 +19,17 @@ elif ! git -C "$runtime_source" apply --reverse --check "$runtime_patch" 2>/dev/
     exit 1
 fi
 
+sdl_source="$root/lib/ModernGekko/vendor/dolphin/Externals/SDL/SDL"
+sdl_patch="$root/patches/sdl-glibc-posix-spawn.patch"
+if [ -f "$sdl_patch" ]; then
+    if git -C "$sdl_source" apply --check "$sdl_patch" 2>/dev/null; then
+        git -C "$sdl_source" apply "$sdl_patch"
+    elif ! git -C "$sdl_source" apply --reverse --check "$sdl_patch" 2>/dev/null; then
+        echo "SDL patch conflicts with this checkout; existing changes were preserved." >&2
+        exit 1
+    fi
+fi
+
 launcher_source="$root/lib/ModernGekko"
 launcher_patch="$root/patches/moderngekko-glinux-launcher.patch"
 if git -C "$launcher_source" apply --check "$launcher_patch" 2>/dev/null; then

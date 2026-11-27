@@ -14,9 +14,13 @@ if [[ "${1:-}" == --compatibility ]]; then
     echo "Host glibc: $installed"
     exit 0
 fi
-# User files must survive AppImage updates and its read-only temporary mount.
-user_dir="${GLINUX_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fzero-glinux}"
-mkdir -p "$user_dir"
+# The launcher keeps its files in F-ZERO-GLINUX-data beside the .AppImage
+# (see GLINUX_USER_DIR, --user-dir and portable.txt). An extracted AppDir run
+# without the AppImage runtime puts that folder beside the AppDir instead.
+if [[ -z "${APPIMAGE:-}" && -z "${GLINUX_APP_DIR:-}" ]]; then
+    GLINUX_APP_DIR="$(cd -- "$appdir/.." && pwd)"
+    export GLINUX_APP_DIR
+fi
 export MODERNGEKKO_STATICRECOMP=0
 unset STATICRECOMP_MODULE
 export LD_LIBRARY_PATH="$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -29,4 +33,4 @@ fi
 # Honour explicit --wayland/--x11; select Wayland only without X/XWayland.
 backend=()
 if [[ -z "${DISPLAY:-}" && -n "${WAYLAND_DISPLAY:-}" ]]; then backend=(--wayland); fi
-exec "$appdir/usr/bin/ModernGekko" --user-dir "$user_dir" "${backend[@]}" "$@"
+exec "$appdir/usr/bin/ModernGekko" "${backend[@]}" "$@"

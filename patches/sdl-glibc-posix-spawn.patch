@@ -1,0 +1,27 @@
+diff --git a/src/process/posix/SDL_posixprocess.c b/src/process/posix/SDL_posixprocess.c
+index 2d061f96..06af7ce9 100644
+--- a/src/process/posix/SDL_posixprocess.c
++++ b/src/process/posix/SDL_posixprocess.c
+@@ -18,6 +18,9 @@
+      misrepresented as being the original software.
+   3. This notice may not be removed or altered from any source distribution.
+ */
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
+ #include "SDL_internal.h"
+ 
+ #ifdef SDL_PROCESS_POSIX
+@@ -211,8 +214,12 @@ bool SDL_SYS_CreateProcessWithProperties(SDL_Process *process, SDL_PropertiesID
+             SDL_SetError("Setting the working directory is only supported on macOS 10.15 and newer");
+             goto posix_spawn_fail_all;
+         }
++#else
++#if defined(__GLIBC__)
++        if (posix_spawn_file_actions_addchdir_np(&fa, working_directory) != 0) {
+ #else
+         if (posix_spawn_file_actions_addchdir(&fa, working_directory) != 0) {
++#endif
+             SDL_SetError("posix_spawn_file_actions_addchdir failed: %s", strerror(errno));
+             goto posix_spawn_fail_all;
+         }

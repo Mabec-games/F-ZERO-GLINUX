@@ -130,13 +130,26 @@ multiplayer:
 | Current compatibility | Release build requires **glibc 2.35+** (Ubuntu 22.04, Debian 12 or newer) | Avoids that host-glibc dependency by using Freedesktop **26.08** |
 | Best fit | Compatible, recent Linux systems; portable single-file launch | The preferred candidate for older distros and Bazzite testing |
 | Game import | Browse to your own ISO/RVZ | Put the ISO/RVZ in Downloads, which the sandbox can read |
-| Save location | `~/.local/share/fzero-glinux` by default | `~/.var/app/io.github.mabecgames.FZeroGLinux/data/fzero-glinux` |
+| Save location | `F-ZERO-GLINUX-data` folder next to the AppImage | `~/.var/app/io.github.mabecgames.FZeroGLinux/data/fzero-glinux` |
 
-The two packages keep separate profiles. Switching package formats does not
-automatically transfer your saves.
+The two packages keep separate profiles. The AppImage keeps everything (saves,
+settings, mods and the extracted game) in one `F-ZERO-GLINUX-data` folder next
+to it, so you can see how big it is, back it up, or delete it. Keep new
+AppImage versions in the same folder and they use the same data. Older versions
+kept their files in the hidden `~/.local/share/fzero-glinux`; the launcher
+offers to move them over on first start, and "Move files from another folder"
+under GAME FILES brings in the data folder of another copy. Nothing is left
+behind in the old location. If the AppImage's
+folder can't be written to, the launcher falls back to `~/.local/share/fzero-glinux`.
+To choose the location yourself, put a `portable.txt` next to the AppImage: empty
+keeps the files loose next to it, or write a folder name on its first line.
+`GLINUX_USER_DIR` and `--user-dir` still override everything.
 
 **Windows** (10/11, x64) uses a portable zip: unpack it anywhere and run it, no
-installer or extra runtime needed. Saves are stored in `%LOCALAPPDATA%\fzero-glinux`.
+installer or extra runtime needed. Saves are stored in the `F-ZERO-GLINUX-data`
+folder next to `F-ZERO GLINUX.exe` (in `%LOCALAPPDATA%\fzero-glinux` if that folder
+can't be written to, such as Program Files). Files from older versions in
+`%LOCALAPPDATA%\fzero-glinux` can be moved over from the launcher.
 
 ## Start playing
 
@@ -251,7 +264,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
 ```
 
 The package is a portable zip in `dist\`; run `F-ZERO GLINUX.exe`. Saves and the
-imported game are stored in `%LOCALAPPDATA%\fzero-glinux`.
+imported game are stored in the `F-ZERO-GLINUX-data` folder next to it.
 
 ## Project status
 

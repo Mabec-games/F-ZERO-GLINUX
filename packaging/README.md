@@ -19,10 +19,25 @@ Run normally by making it executable and opening it. If FUSE is unavailable:
 ./F-ZERO-GLINUX-preview-20261022-glibc2.44-x86_64.AppImage --appimage-extract-and-run
 ```
 
-Saves, configuration and imported files go in
-`${XDG_DATA_HOME:-$HOME/.local/share}/fzero-glinux` and survive AppImage updates.
-Use `GLINUX_USER_DIR=/absolute/path` or `--user-dir /absolute/path` to choose
-another profile. The AppImage never automatically copies the development save.
+Saves, configuration, mods and the extracted game go in an `F-ZERO-GLINUX-data`
+folder next to the `.AppImage` file, created on first start. New AppImage versions
+placed in the same folder use the same data. When run from an extracted AppDir
+without the AppImage runtime, the folder goes next to the AppDir. If that folder
+can't be written to, the launcher falls back to
+`${XDG_DATA_HOME:-$HOME/.local/share}/fzero-glinux`, where versions up to 0.9.4
+kept everything.
+
+Files from that old location are offered for moving on first start, from
+"Move files from ..." under GAME FILES, or with `--transfer-local`. On the same
+drive files are renamed; across drives each file is copied, its size checked,
+and only then deleted. The old folder is removed once empty. Into a brand-new
+data folder, moved files replace the launcher's fresh defaults; into one already
+in use, files that already exist are kept and the old ones stay where they were.
+
+A `portable.txt` or `portable.ini` next to the AppImage overrides the folder: an
+empty file keeps the files loose next to the AppImage, a first line names a
+folder (relative to the AppImage, or absolute). `GLINUX_USER_DIR=/absolute/path`
+or `--user-dir /absolute/path` override everything.
 To deliberately use the existing development profile on this machine:
 
 ```sh

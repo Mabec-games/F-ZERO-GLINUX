@@ -38,8 +38,11 @@ try:
             raise RuntimeError(f'Missing vendored build source: {required}')
     # Support clean submodule checkouts as well as already-patched working copies.
     for tree, patch in [(source / 'ModernGekko', 'moderngekko-glinux-launcher.patch'),
-                        (source / 'ModernGekko/vendor/dolphin', 'dolphin-glinux-performance.patch')]:
+                        (source / 'ModernGekko/vendor/dolphin', 'dolphin-glinux-performance.patch'),
+                        (source / 'ModernGekko/vendor/dolphin/Externals/SDL/SDL', 'sdl-glibc-posix-spawn.patch')]:
         patch = root / 'patches' / patch
+        if not patch.is_file():
+            continue
         command = ['git', 'apply']
         # Prevent git from finding the enclosing development repository and
         # silently skipping paths outside its current subdirectory.
