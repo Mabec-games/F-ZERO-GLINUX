@@ -523,7 +523,7 @@ index 85860a5..faff075 100644
  
  GameInspectResult InspectGame(const std::filesystem::path& input_root)
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..1968571 100644
+index 6bb9e0e..9d9c5ed 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -1,10 +1,17 @@
@@ -777,7 +777,7 @@ index 6bb9e0e..1968571 100644
    const std::string custom =
        "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";
  #else
-@@ -138,6 +343,546 @@ int main() {
+@@ -138,6 +343,547 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
@@ -1172,7 +1172,8 @@ index 6bb9e0e..1968571 100644
 +#endif
 +    };
 +    const auto read_file = [](const fs::path &path) {
-+      std::ifstream in(path, std::ios::binary);
++      // Text mode, like the writes: Windows stores "\n" as "\r\n".
++      std::ifstream in(path);
 +      return std::string(std::istreambuf_iterator<char>(in), {});
 +    };
 +    const fs::path sandbox = directory / "portable_test";
@@ -1381,7 +1382,7 @@ index 0000000..e07c356
 +
 +int main() { return Run() ? 0 : 1; }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..5b72511 100644
+index 03740d4..6b490e4 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -3,7 +3,10 @@
@@ -3269,7 +3270,7 @@ index 03740d4..5b72511 100644
 +    if (fs::is_regular_file(status))
 +      files.push_back(it->path());
 +    else if (fs::is_symlink(status)
-+#if defined(_WIN32)
++#if defined(_MSC_VER) // MSVC reports directory junctions separately.
 +             || status.type() == fs::file_type::junction
 +#endif
 +    )
